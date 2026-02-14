@@ -1,11 +1,26 @@
-import { View, Text, FlatList, Pressable, ActivityIndicator } from 'react-native';
+import { useCallback } from 'react';
+import { View, Text, FlatList, Pressable, ActivityIndicator, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useRecordings } from '@/hooks/use-recordings';
 import { formatDuration, formatRelativeDate } from '@voicemind/shared';
 
 export default function RecordingsScreen() {
-  const { recordings, loading, refresh } = useRecordings();
+  const { recordings, loading, refresh, deleteRecording } = useRecordings();
   const router = useRouter();
+
+  const confirmDelete = useCallback(
+    (id: string, title: string) => {
+      Alert.alert('Delete Recording', `Are you sure you want to delete "${title}"?`, [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => deleteRecording(id),
+        },
+      ]);
+    },
+    [deleteRecording],
+  );
 
   if (loading) {
     return (
@@ -37,6 +52,7 @@ export default function RecordingsScreen() {
             className="bg-card rounded-2xl p-4 border border-border"
             style={{ borderCurve: 'continuous' }}
             onPress={() => router.push(`/recording/${item.id}`)}
+            onLongPress={() => confirmDelete(item.id, item.title)}
           >
             <Text className="text-foreground font-semibold text-base" numberOfLines={1}>
               {item.title}
