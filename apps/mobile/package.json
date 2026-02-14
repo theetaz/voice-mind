@@ -13,11 +13,11 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@config-plugins/react-native-webrtc": "*",
     "@expo/vector-icons": "^15.0.3",
     "@livekit/react-native": "*",
     "@livekit/react-native-expo-plugin": "*",
     "@livekit/react-native-webrtc": "*",
-    "@config-plugins/react-native-webrtc": "*",
     "@react-native-async-storage/async-storage": "*",
     "@react-navigation/bottom-tabs": "^7.4.0",
     "@react-navigation/elements": "^2.6.3",
@@ -27,6 +27,7 @@
     "expo": "~54.0.33",
     "expo-audio": "*",
     "expo-auth-session": "*",
+    "expo-build-properties": "~1.0.10",
     "expo-constants": "~18.0.13",
     "expo-crypto": "*",
     "expo-dev-client": "*",
@@ -59,8 +60,8 @@
   },
   "devDependencies": {
     "@types/react": "~19.1.0",
-    "typescript": "~5.9.2",
     "eslint": "^9.25.0",
-    "eslint-config-expo": "~10.0.0"
+    "eslint-config-expo": "~10.0.0",
+    "typescript": "~5.9.2"
   }
 }
