@@ -1,0 +1,19 @@
+# Supabase API
+supabase.yourdomain.com {
+	reverse_proxy localhost:8000
+}
+
+# Supabase Studio
+studio.yourdomain.com {
+	reverse_proxy localhost:3000
+}
+
+# LiveKit Server
+livekit.yourdomain.com {
+	reverse_proxy localhost:7880
+}
+
+# LiveKit TURN TLS
+turn.yourdomain.com {
+	reverse_proxy localhost:5349
+}

@@ -1,0 +1,12 @@
+{
+  "name": "@voicemind/supabase",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "supabase": "latest"
+  }
+}

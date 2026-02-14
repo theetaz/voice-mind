@@ -1,0 +1,17 @@
+{
+  "name": "voicemind",
+  "private": true,
+  "scripts": {
+    "mobile": "pnpm --filter @voicemind/mobile",
+    "shared": "pnpm --filter @voicemind/shared",
+    "supabase": "pnpm --filter @voicemind/supabase",
+    "dev:mobile": "pnpm --filter @voicemind/mobile start",
+    "build:mobile:ios": "pnpm --filter @voicemind/mobile run ios",
+    "build:mobile:android": "pnpm --filter @voicemind/mobile run android",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck"
+  },
+  "engines": {
+    "node": ">=20.19.4"
+  }
+}
