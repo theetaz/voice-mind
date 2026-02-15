@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { AppState } from 'react-native';
 import { useAudioPlayer, useAudioPlayerStatus, setAudioModeAsync } from 'expo-audio';
 
 export function useAudioPlayback(audioUri: string | null) {
@@ -6,6 +7,7 @@ export function useAudioPlayback(audioUri: string | null) {
   const status = useAudioPlayerStatus(player);
   const [currentWordIndex, setCurrentWordIndex] = useState(-1);
   const wordsRef = useRef<{ start: number; end: number }[]>([]);
+  const wasPlayingRef = useRef(false);
 
   // Configure audio session for playback through speaker
   useEffect(() => {
@@ -14,11 +16,43 @@ export function useAudioPlayback(audioUri: string | null) {
     }
   }, [audioUri]);
 
+  // Track if we were playing — used to detect unexpected stops (BT disconnect)
+  useEffect(() => {
+    if (status.playing) {
+      wasPlayingRef.current = true;
+    } else if (wasPlayingRef.current && !status.playing) {
+      // Audio stopped — could be BT disconnect or natural end
+      wasPlayingRef.current = false;
+    }
+  }, [status.playing]);
+
+  // When app comes back to foreground, re-assert audio mode
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active' && audioUri) {
+        setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true });
+      }
+    });
+    return () => sub.remove();
+  }, [audioUri]);
+
   const play = useCallback(async () => {
-    // Re-assert playback mode before each play — handles BT disconnect scenarios
+    // Force reconfigure audio session before every play.
+    // This handles BT disconnect: iOS may have switched the route to
+    // a non-existent output. Re-setting the mode forces iOS to pick
+    // the best available output (built-in speaker).
     await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true });
+
+    // If the player lost its source (e.g. after audio route change),
+    // reload it by replacing the source.
+    if (!player.playing && audioUri && !player.isLoaded) {
+      player.replace({ uri: audioUri });
+      // Small wait for source to load
+      await new Promise((r) => setTimeout(r, 200));
+    }
+
     player.play();
-  }, [player]);
+  }, [player, audioUri]);
 
   const pause = useCallback(() => player.pause(), [player]);
 
