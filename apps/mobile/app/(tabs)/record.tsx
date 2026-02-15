@@ -131,8 +131,8 @@ export default function RecordScreen() {
   const statusText = saving ? 'Saving...' : isRecording ? 'Recording...' : 'Ready';
 
   return (
-    <View className="flex-1 bg-background px-6 pb-12" style={{ paddingTop: insets.top + 24 }}>
-      <Text className="text-foreground font-semibold text-center mb-4" style={{ fontSize: 22 }}>
+    <View className="flex-1 bg-background px-6 pb-12" style={{ paddingTop: insets.top }}>
+      <Text className="text-foreground font-bold text-center py-4" style={{ fontSize: 20 }}>
         {isRecording || saving ? 'Active Recording' : 'Record'}
       </Text>
 
