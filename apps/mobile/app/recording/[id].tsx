@@ -123,11 +123,22 @@ export default function RecordingDetailScreen() {
   }, [titleDraft, recording?.title, id]);
 
   const retryProcessing = useCallback(async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    const { data: profile } = await supabase.from('profiles').select('transcription_enabled, summarization_enabled').eq('id', user.id).single();
+    const transcriptionEnabled = profile?.transcription_enabled !== false;
+    const summarizationEnabled = profile?.summarization_enabled !== false;
+
     await supabase.from('recordings').update({ status: 'processing' }).eq('id', id);
     setRecording((prev) => (prev ? { ...prev, status: 'processing' } : prev));
     try {
+      if (!transcriptionEnabled) {
+        await supabase.from('recordings').update({ status: 'ready' }).eq('id', id);
+        setRecording((prev) => (prev ? { ...prev, status: 'ready' } : prev));
+        return;
+      }
       const { error: tErr } = await supabase.functions.invoke('transcribe', { body: { recordingId: id } });
-      if (!tErr) {
+      if (!tErr && summarizationEnabled) {
         await supabase.functions.invoke('summarize', { body: { recordingId: id } });
       }
     } catch {
