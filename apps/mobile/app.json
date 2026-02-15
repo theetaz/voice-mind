@@ -52,6 +52,13 @@
             "buildReactNativeFromSource": true
           }
         }
+      ],
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "VoiceMind needs microphone access to record voice memos.",
+          "speechRecognitionPermission": "VoiceMind uses speech recognition for live transcription."
+        }
       ]
     ],
     "experiments": {
