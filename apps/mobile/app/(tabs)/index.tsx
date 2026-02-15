@@ -14,7 +14,6 @@ import { useRouter } from 'expo-router';
 import { Image } from 'expo-image';
 import { useRecordings, type RecordingWithMeta } from '@/hooks/use-recordings';
 import { useTheme } from '@/lib/theme-context';
-import { useAuth } from '@/hooks/use-auth';
 import { formatDuration, formatDateWithTime } from '@voicemind/shared';
 
 const STATUS_STYLES: Record<string, { bg: string; text: string; label: string }> = {
@@ -81,7 +80,6 @@ const RecordingCard = memo(function RecordingCard({
 
 export default function RecordingsScreen() {
   const { recordings, loading, loadingMore, hasMore, refresh, loadMore, search, clearSearch, deleteRecording } = useRecordings();
-  const { user } = useAuth();
   const { colors } = useTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -131,17 +129,8 @@ export default function RecordingsScreen() {
 
   return (
     <View className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
-      <View className="px-4 pt-4 pb-3">
-        <View className="flex-row items-center justify-between mb-3">
-          <Text className="text-foreground font-bold" style={{ fontSize: 28 }}>Recordings</Text>
-          <Pressable onPress={() => router.push('/(tabs)/settings')} className="p-2 -mr-2">
-            <View className="w-10 h-10 rounded-full bg-primary/20 items-center justify-center">
-              <Text className="text-primary font-bold text-lg">
-                {(user?.email?.[0] ?? 'U').toUpperCase()}
-              </Text>
-            </View>
-          </Pressable>
-        </View>
+      <View className="px-4 pb-3">
+        <Text className="text-foreground font-bold text-center py-4" style={{ fontSize: 20 }}>Recordings</Text>
         <View className="bg-card rounded-xl border border-border flex-row items-center px-3 py-2.5">
           <Image source="sf:magnifyingglass" style={{ width: 18, height: 18 }} tintColor={colors.mutedForeground} />
           <TextInput
