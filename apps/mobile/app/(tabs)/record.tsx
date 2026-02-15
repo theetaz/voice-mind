@@ -1,5 +1,12 @@
-import { useCallback, useState } from 'react';
-import { View, Text, Pressable, Alert, ActivityIndicator, ScrollView } from 'react-native';
+import { useCallback, useRef, useState } from 'react';
+import {
+  View,
+  Text,
+  Pressable,
+  Alert,
+  ActivityIndicator,
+  ScrollView,
+} from 'react-native';
 import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -7,36 +14,34 @@ import { decode } from 'base64-arraybuffer';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/hooks/use-auth';
 import { useRecorder } from '@/hooks/use-recorder';
-import { useLivekitSession } from '@/hooks/use-livekit-session';
+import { useLiveTranscription } from '@/hooks/use-live-transcription';
 import { useTheme } from '@/lib/theme-context';
+import { LiveWaveform } from '@/components/LiveWaveform';
 import { formatDuration, getAudioStoragePath, STORAGE_BUCKET } from '@voicemind/shared';
-
-const LIVEKIT_ENABLED = !!process.env.EXPO_PUBLIC_LIVEKIT_URL;
 
 export default function RecordScreen() {
   const { user } = useAuth();
   const { colors } = useTheme();
   const router = useRouter();
   const { start, stop, isRecording, durationSeconds } = useRecorder();
-  const livekit = useLivekitSession();
+  const live = useLiveTranscription();
   const [saving, setSaving] = useState(false);
+  const scrollRef = useRef<ScrollView>(null);
 
   const startRecording = useCallback(async () => {
     try {
       if (process.env.EXPO_OS === 'ios') {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       }
+      // Start audio recorder first (sets audio session)
       const started = await start();
       if (!started) return;
-
-      if (LIVEKIT_ENABLED) {
-        const roomName = `recording-${Date.now()}`;
-        livekit.connect(roomName).catch(console.error);
-      }
+      // Start live transcription + volume metering alongside
+      await live.startListening();
     } catch (e: any) {
       Alert.alert('Error', e.message);
     }
-  }, [start, livekit]);
+  }, [start, live]);
 
   const stopRecording = useCallback(async () => {
     if (!user) return;
@@ -46,20 +51,23 @@ export default function RecordScreen() {
       }
       setSaving(true);
 
-      if (livekit.connected) await livekit.disconnect();
-
+      // Stop both systems
+      live.stopListening();
       const { uri, durationSeconds: dur } = await stop();
+
       if (!uri) {
         Alert.alert('Error', 'No audio file was recorded.');
         setSaving(false);
         return;
       }
 
+      // Read audio as base64 for upload
       const base64 = await FileSystem.readAsStringAsync(uri, {
         encoding: FileSystem.EncodingType.Base64,
       });
       const fileSize = Math.round((base64.length * 3) / 4);
 
+      // Create recording entry
       const { data: recording, error: insertError } = await supabase
         .from('recordings')
         .insert({
@@ -75,6 +83,7 @@ export default function RecordScreen() {
       if (insertError) throw insertError;
       if (!recording) throw new Error('Failed to create recording');
 
+      // Upload M4A to storage
       const storagePath = getAudioStoragePath(user.id, recording.id);
       const { error: uploadError } = await supabase.storage
         .from(STORAGE_BUCKET)
@@ -84,17 +93,17 @@ export default function RecordScreen() {
 
       await supabase.from('recordings').update({ audio_path: storagePath }).eq('id', recording.id);
 
-      const liveText = livekit.getFullTranscript();
+      // Store live transcript as draft (Whisper will replace it)
+      const liveText = live.getFullTranscript();
       if (liveText) {
         await supabase.from('transcripts').insert({
           recording_id: recording.id,
           full_text: liveText,
           words: [],
-          provider: 'deepgram',
+          provider: 'speech-recognition',
           is_final: false,
         });
       }
-      livekit.clearTranscript();
 
       router.push(`/recording/${recording.id}`);
       triggerProcessing(recording.id);
@@ -104,53 +113,97 @@ export default function RecordScreen() {
     } finally {
       setSaving(false);
     }
-  }, [user, stop, router, livekit]);
+  }, [user, stop, router, live]);
 
-  const liveText = livekit.liveTranscript;
-  const currentText = liveText.length > 0 ? liveText[liveText.length - 1].text : '';
+  // Combine finals + interim for display
+  const displayText = live.interimText
+    ? live.transcript
+      ? `${live.transcript} ${live.interimText}`
+      : live.interimText
+    : live.transcript;
 
   return (
-    <View className="flex-1 bg-background items-center justify-center px-6">
-      <Text
-        className="text-6xl font-light text-foreground mb-8"
-        style={{ fontVariant: ['tabular-nums'] }}
-      >
-        {formatDuration(durationSeconds)}
-      </Text>
-
-      {isRecording && LIVEKIT_ENABLED && currentText ? (
-        <ScrollView
-          className="max-h-32 w-full mb-8 bg-card rounded-2xl p-4 border border-border"
-          style={{ borderCurve: 'continuous' }}
+    <View className="flex-1 bg-background items-center justify-between px-6 pb-12 pt-8">
+      {/* Timer */}
+      <View className="items-center">
+        <Text
+          className="text-5xl font-extralight text-foreground"
+          style={{ fontVariant: ['tabular-nums'] }}
         >
-          <Text className="text-foreground text-sm leading-5">{currentText}</Text>
-        </ScrollView>
-      ) : (
-        <View className="h-8 mb-8" />
-      )}
+          {formatDuration(durationSeconds)}
+        </Text>
+        <Text className="text-muted-foreground text-xs mt-1">
+          {saving ? 'Saving...' : isRecording ? 'Recording' : 'Ready'}
+        </Text>
+      </View>
 
-      {saving ? (
-        <View className="w-20 h-20 rounded-full bg-muted items-center justify-center">
-          <ActivityIndicator color={colors.primary} />
-        </View>
-      ) : (
-        <Pressable
-          className={`w-20 h-20 rounded-full items-center justify-center ${
-            isRecording ? 'bg-destructive' : 'bg-primary'
-          }`}
-          onPress={isRecording ? stopRecording : startRecording}
-        >
+      {/* Waveform + Transcript area */}
+      <View className="flex-1 w-full items-center justify-center gap-5 my-6">
+        {/* Waveform */}
+        <LiveWaveform
+          active={isRecording}
+          processing={saving}
+          volume={live.volume}
+          barCount={40}
+          barWidth={3}
+          height={80}
+          barColor={colors.primary}
+          barColorMuted={colors.muted}
+        />
+
+        {/* Live transcript */}
+        {displayText ? (
+          <ScrollView
+            ref={scrollRef}
+            className="max-h-40 w-full bg-card rounded-2xl p-4 border border-border"
+            style={{ borderCurve: 'continuous' }}
+            onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: true })}
+          >
+            <Text className="text-foreground text-sm leading-6">
+              {live.transcript ? (
+                <Text>{live.transcript} </Text>
+              ) : null}
+              {live.interimText ? (
+                <Text className="text-muted-foreground">{live.interimText}</Text>
+              ) : null}
+            </Text>
+          </ScrollView>
+        ) : isRecording ? (
           <View
-            className={
-              isRecording ? 'w-7 h-7 rounded-sm bg-white' : 'w-7 h-7 rounded-full bg-white'
-            }
-          />
-        </Pressable>
-      )}
+            className="w-full bg-card rounded-2xl p-4 border border-border items-center"
+            style={{ borderCurve: 'continuous' }}
+          >
+            <Text className="text-muted-foreground text-sm">Listening...</Text>
+          </View>
+        ) : null}
+      </View>
 
-      <Text className="text-muted-foreground text-sm mt-6">
-        {saving ? 'Saving...' : isRecording ? 'Tap to stop' : 'Tap to start recording'}
-      </Text>
+      {/* Record button */}
+      <View className="items-center">
+        {saving ? (
+          <View className="w-20 h-20 rounded-full bg-muted items-center justify-center">
+            <ActivityIndicator color={colors.primary} />
+          </View>
+        ) : (
+          <Pressable
+            className={`w-20 h-20 rounded-full items-center justify-center ${
+              isRecording ? 'bg-destructive' : 'bg-primary'
+            }`}
+            onPress={isRecording ? stopRecording : startRecording}
+          >
+            <View
+              className={
+                isRecording
+                  ? 'w-7 h-7 rounded-sm bg-white'
+                  : 'w-7 h-7 rounded-full bg-white'
+              }
+            />
+          </Pressable>
+        )}
+        <Text className="text-muted-foreground text-sm mt-4">
+          {saving ? 'Saving recording...' : isRecording ? 'Tap to stop' : 'Tap to record'}
+        </Text>
+      </View>
     </View>
   );
 }
