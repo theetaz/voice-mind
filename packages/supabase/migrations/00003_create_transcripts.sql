@@ -10,7 +10,7 @@ create table public.transcripts (
   updated_at timestamptz default now() not null
 );
 
-create index idx_transcripts_recording_id on public.transcripts(recording_id);
+create unique index idx_transcripts_recording_id on public.transcripts(recording_id);
 
 alter table public.transcripts enable row level security;
 
