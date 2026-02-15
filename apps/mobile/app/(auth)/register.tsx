@@ -2,9 +2,11 @@ import { useState } from 'react';
 import { View, Text, TextInput, Pressable, Alert, KeyboardAvoidingView } from 'react-native';
 import { Link } from 'expo-router';
 import { useAuth } from '@/hooks/use-auth';
+import { useTheme } from '@/lib/theme-context';
 
 export default function RegisterScreen() {
   const { signUpWithEmail } = useAuth();
+  const { colors } = useTheme();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -38,7 +40,7 @@ export default function RegisterScreen() {
         <TextInput
           className="bg-card border border-border rounded-xl px-4 py-3.5 text-base text-foreground mb-3"
           placeholder="Email"
-          placeholderTextColor="#94A3B8"
+          placeholderTextColor={colors.mutedForeground}
           value={email}
           onChangeText={setEmail}
           autoCapitalize="none"
@@ -47,7 +49,7 @@ export default function RegisterScreen() {
         <TextInput
           className="bg-card border border-border rounded-xl px-4 py-3.5 text-base text-foreground mb-3"
           placeholder="Password"
-          placeholderTextColor="#94A3B8"
+          placeholderTextColor={colors.mutedForeground}
           value={password}
           onChangeText={setPassword}
           secureTextEntry
@@ -55,7 +57,7 @@ export default function RegisterScreen() {
         <TextInput
           className="bg-card border border-border rounded-xl px-4 py-3.5 text-base text-foreground mb-6"
           placeholder="Confirm Password"
-          placeholderTextColor="#94A3B8"
+          placeholderTextColor={colors.mutedForeground}
           value={confirmPassword}
           onChangeText={setConfirmPassword}
           secureTextEntry
