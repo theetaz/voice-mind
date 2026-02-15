@@ -2,7 +2,8 @@ import { useCallback, useState } from 'react';
 import { View, Text, Pressable, Alert, ActivityIndicator, ScrollView } from 'react-native';
 import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
+import { decode } from 'base64-arraybuffer';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/hooks/use-auth';
 import { useRecorder } from '@/hooks/use-recorder';
@@ -26,7 +27,6 @@ export default function RecordScreen() {
       const started = await start();
       if (!started) return;
 
-      // Connect to LiveKit for real-time transcription if available
       if (LIVEKIT_ENABLED) {
         const roomName = `recording-${Date.now()}`;
         livekit.connect(roomName).catch(console.error);
@@ -44,7 +44,6 @@ export default function RecordScreen() {
       }
       setSaving(true);
 
-      // Disconnect LiveKit
       if (livekit.connected) {
         await livekit.disconnect();
       }
@@ -57,11 +56,13 @@ export default function RecordScreen() {
         return;
       }
 
-      // Read file for upload
-      const fileInfo = await FileSystem.getInfoAsync(uri);
-      const fileSize = fileInfo.exists ? (fileInfo as any).size ?? 0 : 0;
+      // Read audio file as base64 (the only reliable way in React Native)
+      const base64 = await FileSystem.readAsStringAsync(uri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+      const fileSize = Math.round((base64.length * 3) / 4); // approximate decoded size
 
-      // Create recording entry first to get the ID
+      // Create recording entry to get the ID
       const { data: recording, error: insertError } = await supabase
         .from('recordings')
         .insert({
@@ -77,15 +78,12 @@ export default function RecordScreen() {
       if (insertError) throw insertError;
       if (!recording) throw new Error('Failed to create recording');
 
-      // Upload audio to Supabase Storage
+      // Upload audio to Supabase Storage via ArrayBuffer decoded from base64
       const storagePath = getAudioStoragePath(user.id, recording.id);
-      const fileBase64 = await FileSystem.readAsStringAsync(uri, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
       const { error: uploadError } = await supabase.storage
         .from(STORAGE_BUCKET)
-        .upload(storagePath, decode(fileBase64), {
-          contentType: 'audio/mp4',
+        .upload(storagePath, decode(base64), {
+          contentType: 'audio/m4a',
           upsert: true,
         });
 
@@ -116,7 +114,8 @@ export default function RecordScreen() {
       // Trigger post-processing pipeline (fire-and-forget)
       triggerProcessing(recording.id);
     } catch (e: any) {
-      Alert.alert('Error', e.message);
+      console.error('Stop recording error:', e);
+      Alert.alert('Error', e.message ?? 'Something went wrong');
     } finally {
       setSaving(false);
     }
@@ -134,7 +133,6 @@ export default function RecordScreen() {
         {formatDuration(durationSeconds)}
       </Text>
 
-      {/* Live transcript overlay */}
       {isRecording && LIVEKIT_ENABLED && currentText ? (
         <ScrollView
           className="max-h-32 w-full mb-8 bg-card rounded-2xl p-4 border border-border"
@@ -174,52 +172,19 @@ export default function RecordScreen() {
 
 async function triggerProcessing(recordingId: string) {
   try {
-    const { data: { session } } = await supabase.auth.getSession();
-    const token = session?.access_token;
-    const baseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
-
-    // Transcribe
-    const transcribeRes = await fetch(`${baseUrl}/functions/v1/transcribe`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ recordingId }),
+    const { error: tErr } = await supabase.functions.invoke('transcribe', {
+      body: { recordingId },
     });
+    if (tErr) {
+      console.warn('Transcription failed:', tErr.message);
+      throw tErr;
+    }
 
-    if (!transcribeRes.ok) throw new Error('Transcription failed');
-
-    // Summarize
-    await fetch(`${baseUrl}/functions/v1/summarize`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ recordingId }),
+    const { error: sErr } = await supabase.functions.invoke('summarize', {
+      body: { recordingId },
     });
-  } catch (e) {
-    console.error('Processing pipeline error:', e);
-    await supabase
-      .from('recordings')
-      .update({ status: 'failed' })
-      .eq('id', recordingId);
+    if (sErr) console.warn('Summarization failed:', sErr.message);
+  } catch {
+    await supabase.from('recordings').update({ status: 'failed' }).eq('id', recordingId);
   }
-}
-
-// Base64 to ArrayBuffer for Supabase Storage upload
-function decode(base64: string): ArrayBuffer {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-  const bytes: number[] = [];
-  for (let i = 0; i < base64.length; i += 4) {
-    const a = chars.indexOf(base64[i]);
-    const b = chars.indexOf(base64[i + 1]);
-    const c = chars.indexOf(base64[i + 2]);
-    const d = chars.indexOf(base64[i + 3]);
-    bytes.push((a << 2) | (b >> 4));
-    if (base64[i + 2] !== '=') bytes.push(((b & 15) << 4) | (c >> 2));
-    if (base64[i + 3] !== '=') bytes.push(((c & 3) << 6) | d);
-  }
-  return new Uint8Array(bytes).buffer;
 }
