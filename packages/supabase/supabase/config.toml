@@ -373,6 +373,12 @@ verify_jwt = false
 [functions.livekit-token]
 verify_jwt = false
 
+[functions.update-transcript]
+verify_jwt = true
+
+[functions.search-recordings]
+verify_jwt = true
+
 [analytics]
 enabled = true
 port = 54327
