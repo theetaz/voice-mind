@@ -63,3 +63,4 @@ coverage/
 
 # Supabase
 packages/supabase/.temp/
+scripts/
