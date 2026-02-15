@@ -1,10 +1,16 @@
-import { View, Text, Pressable, Alert, ScrollView } from 'react-native';
+import { useState, useCallback } from 'react';
+import { View, Text, Pressable, Alert, ScrollView, TextInput } from 'react-native';
 import { Image } from 'expo-image';
 import { useAuth } from '@/hooks/use-auth';
+import { supabase } from '@/lib/supabase';
 import { APP_NAME } from '@voicemind/shared';
 
 export default function SettingsScreen() {
   const { user, signOut } = useAuth();
+  const [editingName, setEditingName] = useState(false);
+  const [displayName, setDisplayName] = useState(
+    user?.user_metadata?.full_name ?? user?.email?.split('@')[0] ?? 'User',
+  );
 
   const handleSignOut = async () => {
     try {
@@ -14,12 +20,23 @@ export default function SettingsScreen() {
     }
   };
 
+  const saveDisplayName = useCallback(async () => {
+    setEditingName(false);
+    if (!displayName.trim()) return;
+    const { error } = await supabase
+      .from('profiles')
+      .update({ display_name: displayName.trim() })
+      .eq('id', user?.id);
+    if (error) Alert.alert('Error', error.message);
+  }, [displayName, user?.id]);
+
   return (
     <ScrollView
       className="flex-1 bg-background"
       contentContainerStyle={{ padding: 16, gap: 16 }}
       contentInsetAdjustmentBehavior="automatic"
     >
+      {/* Profile Card */}
       <View
         className="bg-card rounded-2xl p-4 border border-border"
         style={{ borderCurve: 'continuous' }}
@@ -38,14 +55,28 @@ export default function SettingsScreen() {
             </View>
           )}
           <View className="flex-1">
-            <Text className="text-foreground font-semibold text-base">
-              {user?.user_metadata?.full_name ?? 'User'}
-            </Text>
-            <Text className="text-muted-foreground text-sm">{user?.email}</Text>
+            {editingName ? (
+              <TextInput
+                className="text-foreground font-semibold text-base"
+                value={displayName}
+                onChangeText={setDisplayName}
+                onBlur={saveDisplayName}
+                onSubmitEditing={saveDisplayName}
+                autoFocus
+                returnKeyType="done"
+              />
+            ) : (
+              <Pressable onPress={() => setEditingName(true)}>
+                <Text className="text-foreground font-semibold text-base">{displayName}</Text>
+                <Text className="text-muted-foreground text-xs">Tap to edit name</Text>
+              </Pressable>
+            )}
+            <Text className="text-muted-foreground text-sm mt-0.5">{user?.email}</Text>
           </View>
         </View>
       </View>
 
+      {/* App Info */}
       <View
         className="bg-card rounded-2xl border border-border overflow-hidden"
         style={{ borderCurve: 'continuous' }}
@@ -55,6 +86,7 @@ export default function SettingsScreen() {
         <SettingsRow label="Transcription" value="Auto" />
       </View>
 
+      {/* Sign Out */}
       <Pressable
         className="bg-card rounded-2xl p-4 border border-border items-center"
         style={{ borderCurve: 'continuous' }}
