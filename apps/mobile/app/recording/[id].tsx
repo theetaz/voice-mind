@@ -5,11 +5,45 @@ import {
 import { useLocalSearchParams, Stack } from 'expo-router';
 import { Image } from 'expo-image';
 import Slider from '@react-native-community/slider';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+} from 'react-native-reanimated';
 import { supabase } from '@/lib/supabase';
 import { useAudioPlayback } from '@/hooks/use-audio-player';
 import { useTheme } from '@/lib/theme-context';
 import { formatDuration, formatTimestamp, STORAGE_BUCKET } from '@voicemind/shared';
 import type { Recording, Transcript, Summary } from '@voicemind/shared';
+
+// ── Playback Waveform ──
+const BAR_COUNT = 50;
+const BAR_GAP = 1.5;
+const WAVEFORM_HEIGHT = 56;
+
+const PlaybackBar = ({
+  index,
+  barWidth,
+  height,
+  progress,
+  activeColor,
+  inactiveColor,
+}: {
+  index: number;
+  barWidth: number;
+  height: number;
+  progress: { value: number };
+  activeColor: string;
+  inactiveColor: string;
+}) => {
+  const style = useAnimatedStyle(() => ({
+    width: barWidth,
+    height,
+    borderRadius: barWidth / 2,
+    backgroundColor: index / BAR_COUNT <= progress.value ? activeColor : inactiveColor,
+    transform: [{ translateY: (WAVEFORM_HEIGHT - height) / 2 }],
+  }));
+  return <Animated.View style={style} />;
+};
 
 export default function RecordingDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -23,12 +57,18 @@ export default function RecordingDetailScreen() {
   const [titleDraft, setTitleDraft] = useState('');
   const [showSummary, setShowSummary] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const progress = useSharedValue(0);
 
   const {
     play, pause, seekTo, skipForward, skipBackward,
     isPlaying, isLoaded, duration, position,
     currentWordIndex, setWords,
   } = useAudioPlayback(audioUrl);
+
+  // Keep shared value in sync with playback position
+  useEffect(() => {
+    progress.value = duration > 0 ? position / duration : 0;
+  }, [position, duration, progress]);
 
   const loadData = useCallback(async () => {
     const [recRes, transRes, sumRes] = await Promise.all([
@@ -96,14 +136,18 @@ export default function RecordingDetailScreen() {
     }
   }, [id]);
 
-  const barCount = 40;
-  const waveformBars = useMemo(() => {
-    const bars: number[] = [];
-    for (let i = 0; i < barCount; i++) {
-      bars.push(0.15 + 0.85 * Math.abs(Math.sin(i * 1.8 + 0.5) * Math.cos(i * 0.7 + 2)));
-    }
-    return bars;
-  }, []);
+  // Generate pseudo-random waveform heights seeded by recording id
+  const waveformHeights = useMemo(() => {
+    const seed = id ? id.charCodeAt(0) + id.charCodeAt(id.length - 1) : 42;
+    return Array.from({ length: BAR_COUNT }, (_, i) => {
+      const x = (i * 7 + seed) * 0.1;
+      return 0.12 + 0.88 * Math.abs(
+        Math.sin(x * 1.1) * Math.cos(x * 0.7) * 0.6 +
+        Math.sin(x * 2.3 + 1) * 0.25 +
+        Math.cos(x * 0.4 + 2) * 0.15
+      );
+    });
+  }, [id]);
 
   if (loading) {
     return (
@@ -113,7 +157,10 @@ export default function RecordingDetailScreen() {
     );
   }
 
-  const progressFraction = duration > 0 ? position / duration : 0;
+  const screenWidth = Dimensions.get('window').width;
+  const cardPadding = 16 + 20; // mx-4 + p-5
+  const availableWidth = screenWidth - cardPadding * 2;
+  const barWidth = (availableWidth - BAR_GAP * (BAR_COUNT - 1)) / BAR_COUNT;
   const highlightBg = isDark ? 'rgba(129,140,248,0.2)' : 'rgba(99,102,241,0.15)';
 
   return (
@@ -154,22 +201,28 @@ export default function RecordingDetailScreen() {
         {/* Audio Player Card */}
         <View className="mx-4 mt-2 bg-card rounded-3xl p-5 border border-border" style={{ borderCurve: 'continuous' }}>
           {/* Waveform */}
-          <View className="flex-row items-end justify-center h-16 gap-px mb-4">
-            {waveformBars.map((h, i) => {
-              const filled = i / barCount <= progressFraction;
-              return (
-                <View
+          <Pressable
+            onPress={(e) => {
+              if (!isLoaded || !duration) return;
+              const x = e.nativeEvent.locationX;
+              const frac = Math.max(0, Math.min(1, x / availableWidth));
+              seekTo(frac * duration);
+            }}
+          >
+            <View style={{ height: WAVEFORM_HEIGHT, flexDirection: 'row', alignItems: 'flex-start', gap: BAR_GAP, marginBottom: 12 }}>
+              {waveformHeights.map((h, i) => (
+                <PlaybackBar
                   key={i}
-                  style={{
-                    width: (Dimensions.get('window').width - 80) / barCount - 1,
-                    height: h * 56 + 8,
-                    borderRadius: 999,
-                    backgroundColor: filled ? colors.primary : colors.muted,
-                  }}
+                  index={i}
+                  barWidth={barWidth}
+                  height={Math.max(4, h * WAVEFORM_HEIGHT)}
+                  progress={progress}
+                  activeColor={colors.primary}
+                  inactiveColor={colors.muted}
                 />
-              );
-            })}
-          </View>
+              ))}
+            </View>
+          </Pressable>
 
           {/* Seek slider */}
           <Slider
@@ -203,11 +256,21 @@ export default function RecordingDetailScreen() {
               onPress={isPlaying ? pause : play}
               disabled={!isLoaded && !audioUrl}
             >
-              <Image
-                source={`sf:${isPlaying ? 'pause.fill' : 'play.fill'}`}
-                style={{ width: 26, height: 26 }}
-                tintColor={colors.primaryForeground}
-              />
+              {isPlaying ? (
+                <View style={{ flexDirection: 'row', gap: 5, alignItems: 'center' }}>
+                  <View style={{ width: 5, height: 22, borderRadius: 2, backgroundColor: colors.primaryForeground }} />
+                  <View style={{ width: 5, height: 22, borderRadius: 2, backgroundColor: colors.primaryForeground }} />
+                </View>
+              ) : (
+                <View
+                  style={{
+                    width: 0, height: 0, marginLeft: 4,
+                    borderLeftWidth: 18, borderLeftColor: colors.primaryForeground,
+                    borderTopWidth: 12, borderTopColor: 'transparent',
+                    borderBottomWidth: 12, borderBottomColor: 'transparent',
+                  }}
+                />
+              )}
             </Pressable>
             <Pressable onPress={() => skipForward(15)} className="p-2">
               <Image source="sf:goforward.15" style={{ width: 28, height: 28 }} tintColor={colors.mutedForeground} />
@@ -216,7 +279,7 @@ export default function RecordingDetailScreen() {
         </View>
 
         {/* Processing banner */}
-        {recording?.status === 'processing' && (
+        {recording?.status === 'processing' ? (
           <View
             className="mx-4 mt-4 bg-yellow-50 dark:bg-yellow-950 rounded-2xl p-4 border border-yellow-200 dark:border-yellow-800 flex-row items-center gap-3"
             style={{ borderCurve: 'continuous' }}
@@ -226,10 +289,10 @@ export default function RecordingDetailScreen() {
               Transcribing and summarizing...
             </Text>
           </View>
-        )}
+        ) : null}
 
         {/* Failed banner */}
-        {recording?.status === 'failed' && (
+        {recording?.status === 'failed' ? (
           <View
             className="mx-4 mt-4 bg-red-50 dark:bg-red-950 rounded-2xl p-4 border border-red-200 dark:border-red-800 flex-row items-center justify-between"
             style={{ borderCurve: 'continuous' }}
@@ -239,7 +302,7 @@ export default function RecordingDetailScreen() {
               <Text className="text-primary-foreground font-semibold text-xs">Retry</Text>
             </Pressable>
           </View>
-        )}
+        ) : null}
 
         {/* Transcript */}
         {transcript ? (
