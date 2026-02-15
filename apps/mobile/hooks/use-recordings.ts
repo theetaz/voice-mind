@@ -7,13 +7,13 @@ export function useRecordings() {
   const [recordings, setRecordings] = useState<Recording[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const fetchRecordings = useCallback(async () => {
+  const fetchRecordings = useCallback(async (includeHidden = false) => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from('recordings')
-      .select('*')
-      .order('created_at', { ascending: false });
-
+    let q = supabase.from('recordings').select('*').order('created_at', { ascending: false });
+    if (!includeHidden) {
+      q = q.or('is_hidden.is.null,is_hidden.eq.false');
+    }
+    const { data, error } = await q;
     if (!error && data) setRecordings(data);
     setLoading(false);
   }, []);
@@ -33,5 +33,5 @@ export function useRecordings() {
     if (!error) setRecordings((prev) => prev.filter((r) => r.id !== id));
   }, [recordings]);
 
-  return { recordings, loading, refresh: fetchRecordings, deleteRecording };
+  return { recordings, loading, refresh: () => fetchRecordings(false), refreshWithHidden: () => fetchRecordings(true), deleteRecording };
 }
