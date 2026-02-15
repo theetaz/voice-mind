@@ -1,10 +1,14 @@
-import { useEffect, useState } from 'react';
-import { View, Text, Pressable, ScrollView, ActivityIndicator } from 'react-native';
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
+import {
+  View, Text, Pressable, ScrollView, ActivityIndicator, Alert, TextInput,
+  Dimensions,
+} from 'react-native';
 import { useLocalSearchParams, Stack } from 'expo-router';
 import { Image } from 'expo-image';
+import Slider from '@react-native-community/slider';
 import { supabase } from '@/lib/supabase';
 import { useAudioPlayback } from '@/hooks/use-audio-player';
-import { formatDuration, formatTimestamp } from '@voicemind/shared';
+import { formatDuration, formatTimestamp, STORAGE_BUCKET } from '@voicemind/shared';
 import type { Recording, Transcript, Summary } from '@voicemind/shared';
 
 export default function RecordingDetailScreen() {
@@ -13,33 +17,98 @@ export default function RecordingDetailScreen() {
   const [transcript, setTranscript] = useState<Transcript | null>(null);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(true);
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState('');
+  const [showSummary, setShowSummary] = useState(false);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const { play, pause, seekTo, isPlaying, duration, position, currentWordIndex, setWords } =
-    useAudioPlayback(recording?.audio_path ?? null);
+  const {
+    play, pause, seekTo, skipForward, skipBackward,
+    isPlaying, isLoaded, duration, position,
+    currentWordIndex, setWords,
+  } = useAudioPlayback(audioUrl);
 
-  useEffect(() => {
-    async function load() {
-      const [recRes, transRes, sumRes] = await Promise.all([
-        supabase.from('recordings').select('*').eq('id', id).single(),
-        supabase
-          .from('transcripts')
-          .select('*')
-          .eq('recording_id', id)
-          .eq('is_final', true)
-          .single(),
-        supabase.from('summaries').select('*').eq('recording_id', id).single(),
-      ]);
+  // Load recording data
+  const loadData = useCallback(async () => {
+    const [recRes, transRes, sumRes] = await Promise.all([
+      supabase.from('recordings').select('*').eq('id', id).single(),
+      supabase.from('transcripts').select('*').eq('recording_id', id).eq('is_final', true).single(),
+      supabase.from('summaries').select('*').eq('recording_id', id).single(),
+    ]);
 
-      if (recRes.data) setRecording(recRes.data);
-      if (transRes.data) {
-        setTranscript(transRes.data);
-        setWords(transRes.data.words ?? []);
+    if (recRes.data) {
+      setRecording(recRes.data);
+      setTitleDraft(recRes.data.title);
+      if (recRes.data.audio_path) {
+        const { data: urlData } = await supabase.storage
+          .from(STORAGE_BUCKET)
+          .createSignedUrl(recRes.data.audio_path, 3600);
+        if (urlData?.signedUrl) setAudioUrl(urlData.signedUrl);
       }
-      if (sumRes.data) setSummary(sumRes.data);
-      setLoading(false);
     }
-    load();
+    if (transRes.data) {
+      setTranscript(transRes.data);
+      setWords(transRes.data.words ?? []);
+    }
+    if (sumRes.data) setSummary(sumRes.data);
+    setLoading(false);
   }, [id, setWords]);
+
+  useEffect(() => { loadData(); }, [loadData]);
+
+  // Poll while processing
+  useEffect(() => {
+    if (recording?.status === 'processing') {
+      pollRef.current = setInterval(async () => {
+        const { data } = await supabase.from('recordings').select('status').eq('id', id).single();
+        if (data && data.status !== 'processing') {
+          if (pollRef.current) clearInterval(pollRef.current);
+          loadData();
+        }
+      }, 4000);
+    }
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, [recording?.status, id, loadData]);
+
+  const saveTitle = useCallback(async () => {
+    setEditingTitle(false);
+    if (!titleDraft.trim() || titleDraft === recording?.title) return;
+    const { error } = await supabase.from('recordings').update({ title: titleDraft.trim() }).eq('id', id);
+    if (error) {
+      Alert.alert('Error', error.message);
+      setTitleDraft(recording?.title ?? '');
+    } else {
+      setRecording((prev) => (prev ? { ...prev, title: titleDraft.trim() } : prev));
+    }
+  }, [titleDraft, recording?.title, id]);
+
+  const retryProcessing = useCallback(async () => {
+    await supabase.from('recordings').update({ status: 'processing' }).eq('id', id);
+    setRecording((prev) => (prev ? { ...prev, status: 'processing' } : prev));
+    try {
+      const { error: tErr } = await supabase.functions.invoke('transcribe', {
+        body: { recordingId: id },
+      });
+      if (!tErr) {
+        await supabase.functions.invoke('summarize', { body: { recordingId: id } });
+      }
+    } catch {
+      await supabase.from('recordings').update({ status: 'failed' }).eq('id', id);
+      setRecording((prev) => (prev ? { ...prev, status: 'failed' } : prev));
+    }
+  }, [id]);
+
+  // Waveform bars (decorative, based on position)
+  const barCount = 40;
+  const waveformBars = useMemo(() => {
+    const bars: number[] = [];
+    for (let i = 0; i < barCount; i++) {
+      // Pseudo-random heights seeded by index for consistent look
+      bars.push(0.15 + 0.85 * Math.abs(Math.sin(i * 1.8 + 0.5) * Math.cos(i * 0.7 + 2)));
+    }
+    return bars;
+  }, []);
 
   if (loading) {
     return (
@@ -49,91 +118,176 @@ export default function RecordingDetailScreen() {
     );
   }
 
+  const progressFraction = duration > 0 ? position / duration : 0;
+
   return (
     <>
       <Stack.Screen options={{ title: recording?.title ?? 'Recording' }} />
       <ScrollView
         className="flex-1 bg-background"
-        contentContainerStyle={{ padding: 16, gap: 16 }}
+        contentContainerStyle={{ paddingBottom: 32 }}
         contentInsetAdjustmentBehavior="automatic"
       >
-        {/* Player Controls */}
-        <View
-          className="bg-card rounded-2xl p-5 border border-border items-center"
-          style={{ borderCurve: 'continuous' }}
-        >
-          <Text
-            className="text-3xl font-light text-foreground mb-4"
-            style={{ fontVariant: ['tabular-nums'] }}
-          >
-            {formatTimestamp(position ?? 0)} / {formatDuration(recording?.duration_seconds ?? 0)}
-          </Text>
-          <Pressable
-            className="w-16 h-16 rounded-full bg-primary items-center justify-center"
-            onPress={isPlaying ? pause : play}
-          >
-            <Image
-              source={`sf:${isPlaying ? 'pause.fill' : 'play.fill'}`}
-              style={{ width: 24, height: 24 }}
-              tintColor="#FFFFFF"
+        {/* Title */}
+        <View className="px-5 pt-4 pb-2">
+          {editingTitle ? (
+            <TextInput
+              className="text-foreground font-bold text-xl"
+              value={titleDraft}
+              onChangeText={setTitleDraft}
+              onBlur={saveTitle}
+              onSubmitEditing={saveTitle}
+              autoFocus
+              returnKeyType="done"
             />
-          </Pressable>
+          ) : (
+            <Pressable onPress={() => setEditingTitle(true)}>
+              <Text className="text-foreground font-bold text-xl">{recording?.title}</Text>
+              <Text className="text-muted-foreground text-xs mt-0.5">Tap to rename</Text>
+            </Pressable>
+          )}
         </View>
+
+        {/* Audio Player Card */}
+        <View className="mx-4 mt-2 bg-card rounded-3xl p-5 border border-border" style={{ borderCurve: 'continuous' }}>
+          {/* Waveform visualization */}
+          <View className="flex-row items-end justify-center h-16 gap-px mb-4">
+            {waveformBars.map((h, i) => {
+              const filled = i / barCount <= progressFraction;
+              return (
+                <View
+                  key={i}
+                  className={`rounded-full ${filled ? 'bg-primary' : 'bg-muted'}`}
+                  style={{ width: (Dimensions.get('window').width - 80) / barCount - 1, height: h * 56 + 8 }}
+                />
+              );
+            })}
+          </View>
+
+          {/* Seek slider */}
+          <Slider
+            style={{ width: '100%', height: 32 }}
+            minimumValue={0}
+            maximumValue={duration || 1}
+            value={position}
+            onSlidingComplete={(val) => seekTo(val)}
+            minimumTrackTintColor="#6366F1"
+            maximumTrackTintColor="#E2E8F0"
+            thumbTintColor="#6366F1"
+          />
+
+          {/* Time labels */}
+          <View className="flex-row justify-between px-1 mb-5">
+            <Text className="text-muted-foreground text-xs" style={{ fontVariant: ['tabular-nums'] }}>
+              {formatTimestamp(position)}
+            </Text>
+            <Text className="text-muted-foreground text-xs" style={{ fontVariant: ['tabular-nums'] }}>
+              {formatDuration(duration || recording?.duration_seconds || 0)}
+            </Text>
+          </View>
+
+          {/* Transport controls */}
+          <View className="flex-row items-center justify-center gap-8">
+            {/* Rewind 15s */}
+            <Pressable onPress={() => skipBackward(15)} className="p-2">
+              <Image source="sf:gobackward.15" style={{ width: 28, height: 28 }} tintColor="#64748B" />
+            </Pressable>
+
+            {/* Play/Pause */}
+            <Pressable
+              className="w-16 h-16 rounded-full bg-primary items-center justify-center"
+              onPress={isPlaying ? pause : play}
+              disabled={!isLoaded && !audioUrl}
+            >
+              <Image
+                source={`sf:${isPlaying ? 'pause.fill' : 'play.fill'}`}
+                style={{ width: 26, height: 26 }}
+                tintColor="#FFFFFF"
+              />
+            </Pressable>
+
+            {/* Forward 15s */}
+            <Pressable onPress={() => skipForward(15)} className="p-2">
+              <Image source="sf:goforward.15" style={{ width: 28, height: 28 }} tintColor="#64748B" />
+            </Pressable>
+          </View>
+        </View>
+
+        {/* Status Banners */}
+        {recording?.status === 'processing' && (
+          <View className="mx-4 mt-4 bg-yellow-50 rounded-2xl p-4 border border-yellow-200 flex-row items-center gap-3" style={{ borderCurve: 'continuous' }}>
+            <ActivityIndicator size="small" color="#EAB308" />
+            <Text className="text-yellow-700 text-sm flex-1">Transcribing and summarizing...</Text>
+          </View>
+        )}
+
+        {recording?.status === 'failed' && (
+          <View className="mx-4 mt-4 bg-red-50 rounded-2xl p-4 border border-red-200 flex-row items-center justify-between" style={{ borderCurve: 'continuous' }}>
+            <Text className="text-red-700 text-sm">Processing failed</Text>
+            <Pressable className="bg-primary px-4 py-1.5 rounded-full" onPress={retryProcessing}>
+              <Text className="text-white font-semibold text-xs">Retry</Text>
+            </Pressable>
+          </View>
+        )}
 
         {/* Transcript */}
         {transcript && (
-          <View
-            className="bg-card rounded-2xl p-5 border border-border"
-            style={{ borderCurve: 'continuous' }}
-          >
-            <Text className="text-foreground font-semibold text-lg mb-3">Transcript</Text>
+          <View className="mx-4 mt-4 bg-card rounded-2xl p-5 border border-border" style={{ borderCurve: 'continuous' }}>
+            <Text className="text-foreground font-semibold text-base mb-3">Transcript</Text>
             <Text className="text-foreground text-base leading-7" selectable>
               {transcript.words.length > 0
                 ? transcript.words.map((w, i) => (
                     <Text
                       key={i}
-                      className={i === currentWordIndex ? 'bg-primary/20 text-primary' : ''}
+                      style={i === currentWordIndex ? { backgroundColor: 'rgba(99,102,241,0.15)', color: '#6366F1', fontWeight: '600' } : undefined}
                       onPress={() => seekTo(w.start)}
                     >
                       {w.word}{' '}
                     </Text>
                   ))
-                : transcript.full_text}
+                : transcript.full_text || 'No transcript available.'}
             </Text>
           </View>
         )}
 
-        {/* Summary */}
+        {/* Summary toggle */}
         {summary && (
-          <View
-            className="bg-card rounded-2xl p-5 border border-border"
-            style={{ borderCurve: 'continuous' }}
-          >
-            <Text className="text-foreground font-semibold text-lg mb-3">Summary</Text>
-            <Text className="text-foreground text-base leading-7 mb-4" selectable>
-              {summary.content}
-            </Text>
-            {summary.key_points.length > 0 && (
-              <>
-                <Text className="text-foreground font-semibold text-sm mb-2">Key Points</Text>
-                {summary.key_points.map((point, i) => (
-                  <Text key={i} className="text-muted-foreground text-sm mb-1" selectable>
-                    {'  \u2022  '}
-                    {point}
-                  </Text>
-                ))}
-              </>
+          <View className="mx-4 mt-4 bg-card rounded-2xl border border-border overflow-hidden" style={{ borderCurve: 'continuous' }}>
+            <Pressable
+              className="flex-row items-center justify-between p-5"
+              onPress={() => setShowSummary(!showSummary)}
+            >
+              <Text className="text-foreground font-semibold text-base">Summary</Text>
+              <Image
+                source={`sf:chevron.${showSummary ? 'up' : 'down'}`}
+                style={{ width: 14, height: 14 }}
+                tintColor="#64748B"
+              />
+            </Pressable>
+            {showSummary && (
+              <View className="px-5 pb-5">
+                <Text className="text-foreground text-base leading-7 mb-3" selectable>
+                  {summary.content}
+                </Text>
+                {summary.key_points.length > 0 && (
+                  <>
+                    <Text className="text-foreground font-semibold text-sm mb-2">Key Points</Text>
+                    {summary.key_points.map((point, i) => (
+                      <Text key={i} className="text-muted-foreground text-sm mb-1.5 leading-5" selectable>
+                        {'\u2022  '}{point}
+                      </Text>
+                    ))}
+                  </>
+                )}
+              </View>
             )}
           </View>
         )}
 
-        {/* Status */}
-        {recording?.status === 'processing' && (
-          <View className="bg-yellow-50 rounded-2xl p-5 border border-yellow-200 items-center">
-            <ActivityIndicator size="small" color="#EAB308" />
-            <Text className="text-yellow-700 text-sm mt-2">
-              Transcription and summary in progress...
-            </Text>
+        {/* No content yet */}
+        {!transcript && !summary && recording?.status !== 'processing' && recording?.status !== 'failed' && (
+          <View className="mx-4 mt-4 bg-card rounded-2xl p-5 border border-border items-center" style={{ borderCurve: 'continuous' }}>
+            <Text className="text-muted-foreground text-sm">No transcript or summary available yet.</Text>
           </View>
         )}
       </ScrollView>
