@@ -210,6 +210,21 @@ export default function RecordScreen() {
 
 async function triggerProcessing(recordingId: string) {
   try {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('transcription_enabled, summarization_enabled')
+      .eq('id', user.id)
+      .single();
+    const transcriptionEnabled = profile?.transcription_enabled !== false;
+    const summarizationEnabled = profile?.summarization_enabled !== false;
+
+    if (!transcriptionEnabled) {
+      await supabase.from('recordings').update({ status: 'ready' }).eq('id', recordingId);
+      return;
+    }
+
     const { error: tErr } = await supabase.functions.invoke('transcribe', {
       body: { recordingId },
     });
@@ -217,10 +232,10 @@ async function triggerProcessing(recordingId: string) {
       console.warn('Transcription failed:', tErr.message);
       throw tErr;
     }
-    const { error: sErr } = await supabase.functions.invoke('summarize', {
-      body: { recordingId },
-    });
-    if (sErr) console.warn('Summarization failed:', sErr.message);
+
+    if (summarizationEnabled) {
+      await supabase.functions.invoke('summarize', { body: { recordingId } });
+    }
   } catch {
     await supabase.from('recordings').update({ status: 'failed' }).eq('id', recordingId);
   }
