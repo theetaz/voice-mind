@@ -37,6 +37,9 @@ android/
 .claude/
 .agents/
 .cursor
+.windsurf/
+.agent/
+skills/
 
 # OS
 .DS_Store
