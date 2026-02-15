@@ -187,7 +187,8 @@ export default function RecordingDetailScreen() {
           title: recording?.title ?? 'Recording',
           headerStyle: { backgroundColor: colors.background },
           headerTintColor: colors.primary,
-          headerTitleStyle: { color: colors.foreground, fontSize: 18 },
+          headerTitleStyle: { color: colors.foreground, fontSize: 18, fontWeight: '700' },
+          headerTitleAlign: 'center',
         }}
       />
       <ScrollView
