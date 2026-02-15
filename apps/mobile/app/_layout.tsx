@@ -1,10 +1,13 @@
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { useEffect } from 'react';
+import { LogBox } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { AuthProvider } from '@/lib/auth-context';
 import { useAuth } from '@/hooks/use-auth';
 import '@/lib/livekit';
 import '../global.css';
+
+LogBox.ignoreLogs(['SafeAreaView has been deprecated']);
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const { session, loading } = useAuth();
