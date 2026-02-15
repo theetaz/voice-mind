@@ -1,5 +1,6 @@
-import { useState, useCallback, memo } from 'react';
-import { View, Text, Pressable, Alert, ScrollView, TextInput } from 'react-native';
+import { useState, useCallback, memo, useEffect } from 'react';
+import { View, Text, Pressable, Alert, ScrollView, TextInput, Switch } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { useAuth } from '@/hooks/use-auth';
 import { useTheme } from '@/lib/theme-context';
@@ -22,8 +23,8 @@ const SettingsRow = memo(function SettingsRow({
 }) {
   return (
     <View className="flex-row items-center justify-between px-4 py-3.5 border-b border-border last:border-b-0">
-      <Text className="text-foreground text-base">{label}</Text>
-      <Text className="text-muted-foreground text-base">{value}</Text>
+      <Text className="text-foreground" style={{ fontSize: 17 }}>{label}</Text>
+      <Text className="text-muted-foreground" style={{ fontSize: 17 }}>{value}</Text>
     </View>
   );
 });
@@ -31,10 +32,46 @@ const SettingsRow = memo(function SettingsRow({
 export default function SettingsScreen() {
   const { user, signOut } = useAuth();
   const { mode, setTheme, colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const [editingName, setEditingName] = useState(false);
   const [displayName, setDisplayName] = useState(
     user?.user_metadata?.full_name ?? user?.email?.split('@')[0] ?? 'User',
   );
+  const [transcriptionEnabled, setTranscriptionEnabled] = useState(true);
+  const [summarizationEnabled, setSummarizationEnabled] = useState(true);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    supabase.from('profiles').select('transcription_enabled, summarization_enabled').eq('id', user.id).single().then(({ data }) => {
+      if (data) {
+        setTranscriptionEnabled(data.transcription_enabled !== false);
+        setSummarizationEnabled(data.summarization_enabled !== false);
+      }
+    });
+  }, [user?.id]);
+
+  const updateTranscription = useCallback(async (value: boolean) => {
+    setTranscriptionEnabled(value);
+    if (!value) setSummarizationEnabled(false);
+    const { error } = await supabase.from('profiles').update({
+      transcription_enabled: value,
+      summarization_enabled: value ? summarizationEnabled : false,
+    }).eq('id', user?.id);
+    if (error) {
+      setTranscriptionEnabled(!value);
+      Alert.alert('Error', error.message);
+    }
+  }, [user?.id, summarizationEnabled]);
+
+  const updateSummarization = useCallback(async (value: boolean) => {
+    if (!transcriptionEnabled) return;
+    setSummarizationEnabled(value);
+    const { error } = await supabase.from('profiles').update({ summarization_enabled: value }).eq('id', user?.id);
+    if (error) {
+      setSummarizationEnabled(!value);
+      Alert.alert('Error', error.message);
+    }
+  }, [user?.id, transcriptionEnabled]);
 
   const handleSignOut = async () => {
     try {
@@ -57,9 +94,10 @@ export default function SettingsScreen() {
   return (
     <ScrollView
       className="flex-1 bg-background"
-      contentContainerStyle={{ padding: 16, gap: 16 }}
+      contentContainerStyle={{ padding: 16, gap: 16, paddingTop: insets.top + 16 }}
       contentInsetAdjustmentBehavior="automatic"
     >
+      <Text className="text-foreground font-bold mb-2" style={{ fontSize: 28 }}>Settings</Text>
       {/* Profile Card */}
       <View
         className="bg-card rounded-2xl p-4 border border-border"
@@ -81,7 +119,8 @@ export default function SettingsScreen() {
           <View className="flex-1">
             {editingName ? (
               <TextInput
-                className="text-foreground font-semibold text-base"
+                className="text-foreground font-semibold"
+                style={{ fontSize: 17 }}
                 value={displayName}
                 onChangeText={setDisplayName}
                 onBlur={saveDisplayName}
@@ -91,11 +130,11 @@ export default function SettingsScreen() {
               />
             ) : (
               <Pressable onPress={() => setEditingName(true)}>
-                <Text className="text-foreground font-semibold text-base">{displayName}</Text>
-                <Text className="text-muted-foreground text-xs">Tap to edit name</Text>
+                <Text className="text-foreground font-semibold" style={{ fontSize: 17 }}>{displayName}</Text>
+                <Text className="text-muted-foreground" style={{ fontSize: 13 }}>Tap to edit name</Text>
               </Pressable>
             )}
-            <Text className="text-muted-foreground text-sm mt-0.5">{user?.email}</Text>
+            <Text className="text-muted-foreground mt-0.5" style={{ fontSize: 15 }}>{user?.email}</Text>
           </View>
         </View>
       </View>
@@ -105,7 +144,7 @@ export default function SettingsScreen() {
         className="bg-card rounded-2xl border border-border overflow-hidden"
         style={{ borderCurve: 'continuous' }}
       >
-        <Text className="text-foreground font-semibold text-sm px-4 pt-4 pb-2">Appearance</Text>
+        <Text className="text-foreground font-semibold uppercase tracking-wider px-4 pt-4 pb-2 text-muted-foreground" style={{ fontSize: 12 }}>Appearance</Text>
         <View className="flex-row mx-3 mb-3 bg-muted rounded-xl p-1">
           {THEME_OPTIONS.map((opt) => {
             const active = mode === opt.value;
@@ -124,13 +163,41 @@ export default function SettingsScreen() {
                   tintColor={active ? colors.primary : colors.mutedForeground}
                 />
                 <Text
-                  className={`text-sm font-medium ${active ? 'text-primary' : 'text-muted-foreground'}`}
+                  className={`font-medium ${active ? 'text-primary' : 'text-muted-foreground'}`}
+                  style={{ fontSize: 15 }}
                 >
                   {opt.label}
                 </Text>
               </Pressable>
             );
           })}
+        </View>
+      </View>
+
+      {/* Transcription & Summarization */}
+      <View
+        className="bg-card rounded-2xl border border-border overflow-hidden"
+        style={{ borderCurve: 'continuous' }}
+      >
+        <Text className="text-foreground font-semibold px-4 pt-4 pb-2" style={{ fontSize: 15 }}>Recording</Text>
+        <View className="flex-row items-center justify-between px-4 py-3.5 border-b border-border">
+          <Text className="text-foreground" style={{ fontSize: 17 }}>Transcription</Text>
+          <Switch
+            value={transcriptionEnabled}
+            onValueChange={updateTranscription}
+            trackColor={{ false: colors.muted, true: colors.primary }}
+            thumbColor="#fff"
+          />
+        </View>
+        <View className="flex-row items-center justify-between px-4 py-3.5">
+          <Text className="text-foreground" style={{ fontSize: 17 }}>Summarization</Text>
+          <Switch
+            value={summarizationEnabled}
+            onValueChange={updateSummarization}
+            disabled={!transcriptionEnabled}
+            trackColor={{ false: colors.muted, true: colors.primary }}
+            thumbColor="#fff"
+          />
         </View>
       </View>
 
@@ -141,7 +208,6 @@ export default function SettingsScreen() {
       >
         <SettingsRow label="App Version" value="1.0.0" />
         <SettingsRow label="Audio Quality" value="High" />
-        <SettingsRow label="Transcription" value="Auto" />
       </View>
 
       {/* Sign Out */}
@@ -150,10 +216,10 @@ export default function SettingsScreen() {
         style={{ borderCurve: 'continuous' }}
         onPress={handleSignOut}
       >
-        <Text className="text-destructive font-semibold text-base">Sign Out</Text>
+        <Text className="text-destructive font-semibold" style={{ fontSize: 17 }}>Sign Out</Text>
       </Pressable>
 
-      <Text className="text-muted-foreground text-xs text-center mt-4">
+      <Text className="text-muted-foreground text-center mt-4" style={{ fontSize: 13 }}>
         {APP_NAME} v1.0.0
       </Text>
     </ScrollView>

@@ -24,3 +24,14 @@ export function formatRelativeDate(dateStr: string): string {
   if (diffDays < 7) return `${diffDays} days ago`;
   return date.toLocaleDateString();
 }
+
+export function formatDateWithTime(dateStr: string): string {
+  const date = new Date(dateStr);
+  const now = new Date();
+  const diffDays = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24));
+  const time = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  if (diffDays === 0) return `Today • ${time}`;
+  if (diffDays === 1) return `Yesterday • ${time}`;
+  if (diffDays < 7) return `${date.toLocaleDateString([], { month: 'short', day: 'numeric' })} • ${time}`;
+  return `${date.toLocaleDateString([], { month: 'short', day: 'numeric' })} • ${time}`;
+}

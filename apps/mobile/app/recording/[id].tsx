@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import {
-  View, Text, Pressable, ScrollView, ActivityIndicator, Alert, TextInput, Dimensions,
+  View, Text, Pressable, ScrollView, ActivityIndicator, Alert, TextInput, Dimensions, Share,
 } from 'react-native';
 import { useLocalSearchParams, Stack } from 'expo-router';
 import { Image } from 'expo-image';
@@ -55,7 +55,6 @@ export default function RecordingDetailScreen() {
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState('');
-  const [showSummary, setShowSummary] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const progress = useSharedValue(0);
 
@@ -122,6 +121,13 @@ export default function RecordingDetailScreen() {
     }
   }, [titleDraft, recording?.title, id]);
 
+  const toggleHidden = useCallback(async () => {
+    const next = !recording?.is_hidden;
+    const { error } = await supabase.from('recordings').update({ is_hidden: next }).eq('id', id);
+    if (!error) setRecording((prev) => (prev ? { ...prev, is_hidden: next } : prev));
+    if (!error && next) Alert.alert('Archived', 'Recording archived. Use "Show hidden" in settings to view.');
+  }, [id, recording?.is_hidden]);
+
   const retryProcessing = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
@@ -181,7 +187,7 @@ export default function RecordingDetailScreen() {
           title: recording?.title ?? 'Recording',
           headerStyle: { backgroundColor: colors.background },
           headerTintColor: colors.primary,
-          headerTitleStyle: { color: colors.foreground },
+          headerTitleStyle: { color: colors.foreground, fontSize: 18 },
         }}
       />
       <ScrollView
@@ -193,7 +199,8 @@ export default function RecordingDetailScreen() {
         <View className="px-5 pt-4 pb-2">
           {editingTitle ? (
             <TextInput
-              className="text-foreground font-bold text-xl"
+              className="text-foreground font-bold"
+              style={{ fontSize: 22 }}
               value={titleDraft}
               onChangeText={setTitleDraft}
               onBlur={saveTitle}
@@ -203,8 +210,8 @@ export default function RecordingDetailScreen() {
             />
           ) : (
             <Pressable onPress={() => setEditingTitle(true)}>
-              <Text className="text-foreground font-bold text-xl">{recording?.title}</Text>
-              <Text className="text-muted-foreground text-xs mt-0.5">Tap to rename</Text>
+              <Text className="text-foreground font-bold" style={{ fontSize: 22 }}>{recording?.title}</Text>
+              <Text className="text-muted-foreground mt-0.5" style={{ fontSize: 13 }}>Tap to rename</Text>
             </Pressable>
           )}
         </View>
@@ -249,10 +256,10 @@ export default function RecordingDetailScreen() {
 
           {/* Time labels */}
           <View className="flex-row justify-between px-1 mb-5">
-            <Text className="text-muted-foreground text-xs" style={{ fontVariant: ['tabular-nums'] }}>
+            <Text className="text-muted-foreground" style={{ fontVariant: ['tabular-nums'], fontSize: 14 }}>
               {formatTimestamp(position)}
             </Text>
-            <Text className="text-muted-foreground text-xs" style={{ fontVariant: ['tabular-nums'] }}>
+            <Text className="text-muted-foreground" style={{ fontVariant: ['tabular-nums'], fontSize: 14 }}>
               {formatDuration(duration || recording?.duration_seconds || 0)}
             </Text>
           </View>
@@ -296,11 +303,23 @@ export default function RecordingDetailScreen() {
             style={{ borderCurve: 'continuous' }}
           >
             <ActivityIndicator size="small" color={isDark ? '#FACC15' : '#EAB308'} />
-            <Text className="text-yellow-700 dark:text-yellow-400 text-sm flex-1">
+            <Text className="text-yellow-700 dark:text-yellow-400 flex-1" style={{ fontSize: 16 }}>
               Transcribing and summarizing...
             </Text>
           </View>
         ) : null}
+
+        {/* Archive button */}
+        <Pressable
+          onPress={toggleHidden}
+          className="mx-4 mt-4 bg-card rounded-2xl p-4 border border-border flex-row items-center justify-center gap-2"
+          style={{ borderCurve: 'continuous' }}
+        >
+          <Image source="sf:archivebox" style={{ width: 18, height: 18 }} tintColor={colors.mutedForeground} />
+          <Text className="text-muted-foreground font-medium" style={{ fontSize: 16 }}>
+            {recording?.is_hidden ? 'Unarchive' : 'Archive'}
+          </Text>
+        </Pressable>
 
         {/* Failed banner */}
         {recording?.status === 'failed' ? (
@@ -308,9 +327,9 @@ export default function RecordingDetailScreen() {
             className="mx-4 mt-4 bg-red-50 dark:bg-red-950 rounded-2xl p-4 border border-red-200 dark:border-red-800 flex-row items-center justify-between"
             style={{ borderCurve: 'continuous' }}
           >
-            <Text className="text-red-700 dark:text-red-400 text-sm">Processing failed</Text>
+            <Text className="text-red-700 dark:text-red-400" style={{ fontSize: 16 }}>Processing failed</Text>
             <Pressable className="bg-primary px-4 py-1.5 rounded-full" onPress={retryProcessing}>
-              <Text className="text-primary-foreground font-semibold text-xs">Retry</Text>
+              <Text className="text-primary-foreground font-semibold" style={{ fontSize: 14 }}>Retry</Text>
             </Pressable>
           </View>
         ) : null}
@@ -318,8 +337,20 @@ export default function RecordingDetailScreen() {
         {/* Transcript */}
         {transcript ? (
           <View className="mx-4 mt-4 bg-card rounded-2xl p-5 border border-border" style={{ borderCurve: 'continuous' }}>
-            <Text className="text-foreground font-semibold text-base mb-3">Transcript</Text>
-            <Text className="text-foreground text-base leading-7" selectable>
+            <View className="flex-row items-center justify-between mb-3">
+              <Text className="text-foreground font-semibold uppercase tracking-wider text-muted-foreground" style={{ fontSize: 12 }}>Transcript</Text>
+              <View className="flex-row gap-2">
+                <Pressable
+                  onPress={() => Share.share({ message: transcript.full_text, title: recording?.title ?? 'Transcript' })}
+                  className="px-3 py-2 rounded-lg bg-muted"
+                  style={{ minHeight: 44, justifyContent: 'center' }}
+                  accessible accessibilityRole="button" accessibilityLabel="Share transcript"
+                >
+                  <Text className="text-foreground font-medium" style={{ fontSize: 14 }}>Share</Text>
+                </Pressable>
+              </View>
+            </View>
+            <Text className="text-foreground leading-7" style={{ fontSize: 17 }} selectable>
               {transcript.words.length > 0
                 ? transcript.words.map((w, i) => (
                     <Text
@@ -339,44 +370,32 @@ export default function RecordingDetailScreen() {
           </View>
         ) : null}
 
-        {/* Summary toggle */}
+        {/* Summary */}
         {summary ? (
           <View className="mx-4 mt-4 bg-card rounded-2xl border border-border overflow-hidden" style={{ borderCurve: 'continuous' }}>
-            <Pressable
-              className="flex-row items-center justify-between p-5"
-              onPress={() => setShowSummary(!showSummary)}
-            >
-              <Text className="text-foreground font-semibold text-base">Summary</Text>
-              <Image
-                source={`sf:chevron.${showSummary ? 'up' : 'down'}`}
-                style={{ width: 14, height: 14 }}
-                tintColor={colors.mutedForeground}
-              />
-            </Pressable>
-            {showSummary ? (
-              <View className="px-5 pb-5">
-                <Text className="text-foreground text-base leading-7 mb-3" selectable>
-                  {summary.content}
-                </Text>
-                {summary.key_points.length > 0 ? (
-                  <>
-                    <Text className="text-foreground font-semibold text-sm mb-2">Key Points</Text>
-                    {summary.key_points.map((point, i) => (
-                      <Text key={i} className="text-muted-foreground text-sm mb-1.5 leading-5" selectable>
-                        {'\u2022  '}{point}
-                      </Text>
-                    ))}
-                  </>
-                ) : null}
-              </View>
+            <View className="p-5">
+              <Text className="text-foreground font-semibold uppercase tracking-wider mb-3 text-muted-foreground" style={{ fontSize: 12 }}>Summary</Text>
+            <Text className="text-foreground leading-7 mb-3" style={{ fontSize: 17 }} selectable>
+              {summary.content}
+            </Text>
+            {summary.key_points.length > 0 ? (
+              <>
+                <Text className="text-foreground font-semibold mb-2" style={{ fontSize: 16 }}>Key Points</Text>
+                {summary.key_points.map((point, i) => (
+                  <Text key={i} className="text-muted-foreground mb-1.5 leading-5" style={{ fontSize: 15 }} selectable>
+                    {'\u2022  '}{point}
+                  </Text>
+                ))}
+              </>
             ) : null}
+            </View>
           </View>
         ) : null}
 
         {/* No content yet */}
         {!transcript && !summary && recording?.status !== 'processing' && recording?.status !== 'failed' ? (
           <View className="mx-4 mt-4 bg-card rounded-2xl p-5 border border-border items-center" style={{ borderCurve: 'continuous' }}>
-            <Text className="text-muted-foreground text-sm">No transcript or summary available yet.</Text>
+            <Text className="text-muted-foreground" style={{ fontSize: 16 }}>No transcript or summary available yet.</Text>
           </View>
         ) : null}
       </ScrollView>
