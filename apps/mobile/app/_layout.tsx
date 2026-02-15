@@ -1,4 +1,4 @@
-import { Slot, useRouter, useSegments } from 'expo-router';
+import { Stack, useRouter, useSegments } from 'expo-router';
 import { useEffect } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { AuthProvider } from '@/lib/auth-context';
@@ -6,7 +6,7 @@ import { useAuth } from '@/hooks/use-auth';
 import '@/lib/livekit';
 import '../global.css';
 
-function AuthGuard() {
+function AuthGuard({ children }: { children: React.ReactNode }) {
   const { session, loading } = useAuth();
   const segments = useSegments();
   const router = useRouter();
@@ -18,14 +18,28 @@ function AuthGuard() {
     else if (session && inAuthGroup) router.replace('/(tabs)');
   }, [session, loading, segments]);
 
-  return <Slot />;
+  return <>{children}</>;
 }
 
 export default function RootLayout() {
   return (
     <AuthProvider>
       <StatusBar style="auto" />
-      <AuthGuard />
+      <AuthGuard>
+        <Stack>
+          <Stack.Screen name="(auth)" options={{ headerShown: false }} />
+          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+          <Stack.Screen
+            name="recording/[id]"
+            options={{
+              headerBackTitle: 'Back',
+              headerTintColor: '#6366F1',
+              headerShadowVisible: false,
+              presentation: 'card',
+            }}
+          />
+        </Stack>
+      </AuthGuard>
     </AuthProvider>
   );
 }
