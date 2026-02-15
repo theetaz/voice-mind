@@ -3,28 +3,29 @@ import type { Config } from 'tailwindcss';
 export default {
   content: ['./app/**/*.{ts,tsx}', './components/**/*.{ts,tsx}', './lib/**/*.{ts,tsx}'],
   presets: [require('nativewind/preset')],
+  darkMode: 'class',
   theme: {
     extend: {
       colors: {
         primary: {
-          DEFAULT: '#6366F1',
-          foreground: '#FFFFFF',
+          DEFAULT: 'var(--color-primary)',
+          foreground: 'var(--color-primary-foreground)',
         },
         muted: {
-          DEFAULT: '#F1F5F9',
-          foreground: '#64748B',
+          DEFAULT: 'var(--color-muted)',
+          foreground: 'var(--color-muted-foreground)',
         },
         destructive: {
-          DEFAULT: '#EF4444',
-          foreground: '#FFFFFF',
+          DEFAULT: 'var(--color-destructive)',
+          foreground: 'var(--color-destructive-foreground)',
         },
         card: {
-          DEFAULT: '#FFFFFF',
-          foreground: '#0F172A',
+          DEFAULT: 'var(--color-card)',
+          foreground: 'var(--color-card-foreground)',
         },
-        border: '#E2E8F0',
-        background: '#F8FAFC',
-        foreground: '#0F172A',
+        border: 'var(--color-border)',
+        background: 'var(--color-background)',
+        foreground: 'var(--color-foreground)',
       },
     },
   },
