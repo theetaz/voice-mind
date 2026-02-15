@@ -10,4 +10,8 @@ export interface Recording {
   file_size_bytes: number;
   created_at: string;
   updated_at: string;
+  location_lat?: number | null;
+  location_lng?: number | null;
+  location_name?: string | null;
+  is_hidden?: boolean;
 }
