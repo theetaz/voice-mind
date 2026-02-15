@@ -1,5 +1,6 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { sendExpoPush } from '../_shared/push.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -12,24 +13,13 @@ const SYSTEM_PROMPT = `You are an AI assistant that summarizes voice memos. Give
 
 Respond in JSON format: { "summary": "...", "key_points": ["...", "..."] }`;
 
-serve(async (req) => {
-  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
+async function runSummarization(recordingId: string) {
+  const supabaseAdmin = createClient(
+    Deno.env.get('SUPABASE_URL')!,
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+  );
 
   try {
-    const supabaseAdmin = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
-    );
-
-    const { recordingId } = await req.json();
-    if (!recordingId) {
-      return new Response(JSON.stringify({ error: 'recordingId required' }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
-
-    // Fetch transcript
     const { data: transcript, error: tErr } = await supabaseAdmin
       .from('transcripts')
       .select('full_text')
@@ -38,13 +28,10 @@ serve(async (req) => {
       .single();
 
     if (tErr || !transcript?.full_text) {
-      return new Response(JSON.stringify({ error: 'No transcript found' }), {
-        status: 404,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
+      await supabaseAdmin.from('recordings').update({ status: 'failed' }).eq('id', recordingId);
+      return;
     }
 
-    // Call GPT-4o-mini
     const gptRes = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -63,14 +50,12 @@ serve(async (req) => {
     });
 
     if (!gptRes.ok) {
-      const errText = await gptRes.text();
-      throw new Error(`OpenAI API error: ${errText}`);
+      throw new Error(`OpenAI API error: ${await gptRes.text()}`);
     }
 
     const gptData = await gptRes.json();
     const result = JSON.parse(gptData.choices[0].message.content);
 
-    // Store summary
     await supabaseAdmin.from('summaries').upsert(
       {
         recording_id: recordingId,
@@ -81,9 +66,50 @@ serve(async (req) => {
       { onConflict: 'recording_id' },
     );
 
-    return new Response(JSON.stringify({ success: true, ...result }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
+    await supabaseAdmin
+      .from('recordings')
+      .update({ status: 'ready', updated_at: new Date().toISOString() })
+      .eq('id', recordingId);
+
+    const { data: recording } = await supabaseAdmin
+      .from('recordings')
+      .select('user_id')
+      .eq('id', recordingId)
+      .single();
+    if (recording) {
+      const { data: profile } = await supabaseAdmin
+        .from('profiles')
+        .select('expo_push_token')
+        .eq('id', recording.user_id)
+        .single();
+      await sendExpoPush(profile?.expo_push_token ?? null, 'VoiceMind', 'Your summary is ready.');
+    }
+  } catch {
+    await supabaseAdmin.from('recordings').update({ status: 'failed' }).eq('id', recordingId);
+  }
+}
+
+serve(async (req) => {
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
+
+  try {
+    const { recordingId } = await req.json();
+    if (!recordingId) {
+      return new Response(JSON.stringify({ error: 'recordingId required' }), {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    runSummarization(recordingId);
+
+    return new Response(
+      JSON.stringify({ accepted: true, message: 'Summarization started' }),
+      {
+        status: 202,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      },
+    );
   } catch (e) {
     return new Response(JSON.stringify({ error: e.message }), {
       status: 500,
