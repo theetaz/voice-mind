@@ -8,12 +8,14 @@ import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/hooks/use-auth';
 import { useRecorder } from '@/hooks/use-recorder';
 import { useLivekitSession } from '@/hooks/use-livekit-session';
+import { useTheme } from '@/lib/theme-context';
 import { formatDuration, getAudioStoragePath, STORAGE_BUCKET } from '@voicemind/shared';
 
 const LIVEKIT_ENABLED = !!process.env.EXPO_PUBLIC_LIVEKIT_URL;
 
 export default function RecordScreen() {
   const { user } = useAuth();
+  const { colors } = useTheme();
   const router = useRouter();
   const { start, stop, isRecording, durationSeconds } = useRecorder();
   const livekit = useLivekitSession();
@@ -44,25 +46,20 @@ export default function RecordScreen() {
       }
       setSaving(true);
 
-      if (livekit.connected) {
-        await livekit.disconnect();
-      }
+      if (livekit.connected) await livekit.disconnect();
 
       const { uri, durationSeconds: dur } = await stop();
-
       if (!uri) {
         Alert.alert('Error', 'No audio file was recorded.');
         setSaving(false);
         return;
       }
 
-      // Read audio file as base64 (the only reliable way in React Native)
       const base64 = await FileSystem.readAsStringAsync(uri, {
         encoding: FileSystem.EncodingType.Base64,
       });
-      const fileSize = Math.round((base64.length * 3) / 4); // approximate decoded size
+      const fileSize = Math.round((base64.length * 3) / 4);
 
-      // Create recording entry to get the ID
       const { data: recording, error: insertError } = await supabase
         .from('recordings')
         .insert({
@@ -78,24 +75,15 @@ export default function RecordScreen() {
       if (insertError) throw insertError;
       if (!recording) throw new Error('Failed to create recording');
 
-      // Upload audio to Supabase Storage via ArrayBuffer decoded from base64
       const storagePath = getAudioStoragePath(user.id, recording.id);
       const { error: uploadError } = await supabase.storage
         .from(STORAGE_BUCKET)
-        .upload(storagePath, decode(base64), {
-          contentType: 'audio/m4a',
-          upsert: true,
-        });
+        .upload(storagePath, decode(base64), { contentType: 'audio/m4a', upsert: true });
 
       if (uploadError) throw uploadError;
 
-      // Update recording with audio_path
-      await supabase
-        .from('recordings')
-        .update({ audio_path: storagePath })
-        .eq('id', recording.id);
+      await supabase.from('recordings').update({ audio_path: storagePath }).eq('id', recording.id);
 
-      // Store live transcript if we got one from LiveKit
       const liveText = livekit.getFullTranscript();
       if (liveText) {
         await supabase.from('transcripts').insert({
@@ -108,10 +96,7 @@ export default function RecordScreen() {
       }
       livekit.clearTranscript();
 
-      // Navigate to detail screen
       router.push(`/recording/${recording.id}`);
-
-      // Trigger post-processing pipeline (fire-and-forget)
       triggerProcessing(recording.id);
     } catch (e: any) {
       console.error('Stop recording error:', e);
@@ -146,7 +131,7 @@ export default function RecordScreen() {
 
       {saving ? (
         <View className="w-20 h-20 rounded-full bg-muted items-center justify-center">
-          <ActivityIndicator color="#6366F1" />
+          <ActivityIndicator color={colors.primary} />
         </View>
       ) : (
         <Pressable
@@ -179,7 +164,6 @@ async function triggerProcessing(recordingId: string) {
       console.warn('Transcription failed:', tErr.message);
       throw tErr;
     }
-
     const { error: sErr } = await supabase.functions.invoke('summarize', {
       body: { recordingId },
     });

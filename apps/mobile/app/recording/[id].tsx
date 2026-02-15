@@ -1,18 +1,19 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import {
-  View, Text, Pressable, ScrollView, ActivityIndicator, Alert, TextInput,
-  Dimensions,
+  View, Text, Pressable, ScrollView, ActivityIndicator, Alert, TextInput, Dimensions,
 } from 'react-native';
 import { useLocalSearchParams, Stack } from 'expo-router';
 import { Image } from 'expo-image';
 import Slider from '@react-native-community/slider';
 import { supabase } from '@/lib/supabase';
 import { useAudioPlayback } from '@/hooks/use-audio-player';
+import { useTheme } from '@/lib/theme-context';
 import { formatDuration, formatTimestamp, STORAGE_BUCKET } from '@voicemind/shared';
 import type { Recording, Transcript, Summary } from '@voicemind/shared';
 
 export default function RecordingDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  const { colors, isDark } = useTheme();
   const [recording, setRecording] = useState<Recording | null>(null);
   const [transcript, setTranscript] = useState<Transcript | null>(null);
   const [summary, setSummary] = useState<Summary | null>(null);
@@ -29,7 +30,6 @@ export default function RecordingDetailScreen() {
     currentWordIndex, setWords,
   } = useAudioPlayback(audioUrl);
 
-  // Load recording data
   const loadData = useCallback(async () => {
     const [recRes, transRes, sumRes] = await Promise.all([
       supabase.from('recordings').select('*').eq('id', id).single(),
@@ -57,7 +57,6 @@ export default function RecordingDetailScreen() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  // Poll while processing
   useEffect(() => {
     if (recording?.status === 'processing') {
       pollRef.current = setInterval(async () => {
@@ -87,9 +86,7 @@ export default function RecordingDetailScreen() {
     await supabase.from('recordings').update({ status: 'processing' }).eq('id', id);
     setRecording((prev) => (prev ? { ...prev, status: 'processing' } : prev));
     try {
-      const { error: tErr } = await supabase.functions.invoke('transcribe', {
-        body: { recordingId: id },
-      });
+      const { error: tErr } = await supabase.functions.invoke('transcribe', { body: { recordingId: id } });
       if (!tErr) {
         await supabase.functions.invoke('summarize', { body: { recordingId: id } });
       }
@@ -99,12 +96,10 @@ export default function RecordingDetailScreen() {
     }
   }, [id]);
 
-  // Waveform bars (decorative, based on position)
   const barCount = 40;
   const waveformBars = useMemo(() => {
     const bars: number[] = [];
     for (let i = 0; i < barCount; i++) {
-      // Pseudo-random heights seeded by index for consistent look
       bars.push(0.15 + 0.85 * Math.abs(Math.sin(i * 1.8 + 0.5) * Math.cos(i * 0.7 + 2)));
     }
     return bars;
@@ -113,16 +108,24 @@ export default function RecordingDetailScreen() {
   if (loading) {
     return (
       <View className="flex-1 bg-background items-center justify-center">
-        <ActivityIndicator size="large" color="#6366F1" />
+        <ActivityIndicator size="large" color={colors.primary} />
       </View>
     );
   }
 
   const progressFraction = duration > 0 ? position / duration : 0;
+  const highlightBg = isDark ? 'rgba(129,140,248,0.2)' : 'rgba(99,102,241,0.15)';
 
   return (
     <>
-      <Stack.Screen options={{ title: recording?.title ?? 'Recording' }} />
+      <Stack.Screen
+        options={{
+          title: recording?.title ?? 'Recording',
+          headerStyle: { backgroundColor: colors.background },
+          headerTintColor: colors.primary,
+          headerTitleStyle: { color: colors.foreground },
+        }}
+      />
       <ScrollView
         className="flex-1 bg-background"
         contentContainerStyle={{ paddingBottom: 32 }}
@@ -150,15 +153,19 @@ export default function RecordingDetailScreen() {
 
         {/* Audio Player Card */}
         <View className="mx-4 mt-2 bg-card rounded-3xl p-5 border border-border" style={{ borderCurve: 'continuous' }}>
-          {/* Waveform visualization */}
+          {/* Waveform */}
           <View className="flex-row items-end justify-center h-16 gap-px mb-4">
             {waveformBars.map((h, i) => {
               const filled = i / barCount <= progressFraction;
               return (
                 <View
                   key={i}
-                  className={`rounded-full ${filled ? 'bg-primary' : 'bg-muted'}`}
-                  style={{ width: (Dimensions.get('window').width - 80) / barCount - 1, height: h * 56 + 8 }}
+                  style={{
+                    width: (Dimensions.get('window').width - 80) / barCount - 1,
+                    height: h * 56 + 8,
+                    borderRadius: 999,
+                    backgroundColor: filled ? colors.primary : colors.muted,
+                  }}
                 />
               );
             })}
@@ -171,9 +178,9 @@ export default function RecordingDetailScreen() {
             maximumValue={duration || 1}
             value={position}
             onSlidingComplete={(val) => seekTo(val)}
-            minimumTrackTintColor="#6366F1"
-            maximumTrackTintColor="#E2E8F0"
-            thumbTintColor="#6366F1"
+            minimumTrackTintColor={colors.primary}
+            maximumTrackTintColor={colors.border}
+            thumbTintColor={colors.primary}
           />
 
           {/* Time labels */}
@@ -188,12 +195,9 @@ export default function RecordingDetailScreen() {
 
           {/* Transport controls */}
           <View className="flex-row items-center justify-center gap-8">
-            {/* Rewind 15s */}
             <Pressable onPress={() => skipBackward(15)} className="p-2">
-              <Image source="sf:gobackward.15" style={{ width: 28, height: 28 }} tintColor="#64748B" />
+              <Image source="sf:gobackward.15" style={{ width: 28, height: 28 }} tintColor={colors.mutedForeground} />
             </Pressable>
-
-            {/* Play/Pause */}
             <Pressable
               className="w-16 h-16 rounded-full bg-primary items-center justify-center"
               onPress={isPlaying ? pause : play}
@@ -202,36 +206,43 @@ export default function RecordingDetailScreen() {
               <Image
                 source={`sf:${isPlaying ? 'pause.fill' : 'play.fill'}`}
                 style={{ width: 26, height: 26 }}
-                tintColor="#FFFFFF"
+                tintColor={colors.primaryForeground}
               />
             </Pressable>
-
-            {/* Forward 15s */}
             <Pressable onPress={() => skipForward(15)} className="p-2">
-              <Image source="sf:goforward.15" style={{ width: 28, height: 28 }} tintColor="#64748B" />
+              <Image source="sf:goforward.15" style={{ width: 28, height: 28 }} tintColor={colors.mutedForeground} />
             </Pressable>
           </View>
         </View>
 
-        {/* Status Banners */}
+        {/* Processing banner */}
         {recording?.status === 'processing' && (
-          <View className="mx-4 mt-4 bg-yellow-50 rounded-2xl p-4 border border-yellow-200 flex-row items-center gap-3" style={{ borderCurve: 'continuous' }}>
-            <ActivityIndicator size="small" color="#EAB308" />
-            <Text className="text-yellow-700 text-sm flex-1">Transcribing and summarizing...</Text>
+          <View
+            className="mx-4 mt-4 bg-yellow-50 dark:bg-yellow-950 rounded-2xl p-4 border border-yellow-200 dark:border-yellow-800 flex-row items-center gap-3"
+            style={{ borderCurve: 'continuous' }}
+          >
+            <ActivityIndicator size="small" color={isDark ? '#FACC15' : '#EAB308'} />
+            <Text className="text-yellow-700 dark:text-yellow-400 text-sm flex-1">
+              Transcribing and summarizing...
+            </Text>
           </View>
         )}
 
+        {/* Failed banner */}
         {recording?.status === 'failed' && (
-          <View className="mx-4 mt-4 bg-red-50 rounded-2xl p-4 border border-red-200 flex-row items-center justify-between" style={{ borderCurve: 'continuous' }}>
-            <Text className="text-red-700 text-sm">Processing failed</Text>
+          <View
+            className="mx-4 mt-4 bg-red-50 dark:bg-red-950 rounded-2xl p-4 border border-red-200 dark:border-red-800 flex-row items-center justify-between"
+            style={{ borderCurve: 'continuous' }}
+          >
+            <Text className="text-red-700 dark:text-red-400 text-sm">Processing failed</Text>
             <Pressable className="bg-primary px-4 py-1.5 rounded-full" onPress={retryProcessing}>
-              <Text className="text-white font-semibold text-xs">Retry</Text>
+              <Text className="text-primary-foreground font-semibold text-xs">Retry</Text>
             </Pressable>
           </View>
         )}
 
         {/* Transcript */}
-        {transcript && (
+        {transcript ? (
           <View className="mx-4 mt-4 bg-card rounded-2xl p-5 border border-border" style={{ borderCurve: 'continuous' }}>
             <Text className="text-foreground font-semibold text-base mb-3">Transcript</Text>
             <Text className="text-foreground text-base leading-7" selectable>
@@ -239,7 +250,11 @@ export default function RecordingDetailScreen() {
                 ? transcript.words.map((w, i) => (
                     <Text
                       key={i}
-                      style={i === currentWordIndex ? { backgroundColor: 'rgba(99,102,241,0.15)', color: '#6366F1', fontWeight: '600' } : undefined}
+                      style={
+                        i === currentWordIndex
+                          ? { backgroundColor: highlightBg, color: colors.primary, fontWeight: '600' }
+                          : undefined
+                      }
                       onPress={() => seekTo(w.start)}
                     >
                       {w.word}{' '}
@@ -248,10 +263,10 @@ export default function RecordingDetailScreen() {
                 : transcript.full_text || 'No transcript available.'}
             </Text>
           </View>
-        )}
+        ) : null}
 
         {/* Summary toggle */}
-        {summary && (
+        {summary ? (
           <View className="mx-4 mt-4 bg-card rounded-2xl border border-border overflow-hidden" style={{ borderCurve: 'continuous' }}>
             <Pressable
               className="flex-row items-center justify-between p-5"
@@ -261,15 +276,15 @@ export default function RecordingDetailScreen() {
               <Image
                 source={`sf:chevron.${showSummary ? 'up' : 'down'}`}
                 style={{ width: 14, height: 14 }}
-                tintColor="#64748B"
+                tintColor={colors.mutedForeground}
               />
             </Pressable>
-            {showSummary && (
+            {showSummary ? (
               <View className="px-5 pb-5">
                 <Text className="text-foreground text-base leading-7 mb-3" selectable>
                   {summary.content}
                 </Text>
-                {summary.key_points.length > 0 && (
+                {summary.key_points.length > 0 ? (
                   <>
                     <Text className="text-foreground font-semibold text-sm mb-2">Key Points</Text>
                     {summary.key_points.map((point, i) => (
@@ -278,18 +293,18 @@ export default function RecordingDetailScreen() {
                       </Text>
                     ))}
                   </>
-                )}
+                ) : null}
               </View>
-            )}
+            ) : null}
           </View>
-        )}
+        ) : null}
 
         {/* No content yet */}
-        {!transcript && !summary && recording?.status !== 'processing' && recording?.status !== 'failed' && (
+        {!transcript && !summary && recording?.status !== 'processing' && recording?.status !== 'failed' ? (
           <View className="mx-4 mt-4 bg-card rounded-2xl p-5 border border-border items-center" style={{ borderCurve: 'continuous' }}>
             <Text className="text-muted-foreground text-sm">No transcript or summary available yet.</Text>
           </View>
-        )}
+        ) : null}
       </ScrollView>
     </>
   );
