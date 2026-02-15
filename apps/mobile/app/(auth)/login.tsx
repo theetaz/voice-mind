@@ -12,6 +12,8 @@ import {
 } from 'react-native';
 import { Link } from 'expo-router';
 import { Image } from 'expo-image';
+import FontAwesome5 from '@expo/vector-icons/FontAwesome5';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useAuth } from '@/hooks/use-auth';
 import { useTheme } from '@/lib/theme-context';
 
@@ -53,7 +55,7 @@ export default function LoginScreen() {
           <View className="items-center mb-6">
             <Image
               source={require('@/assets/main-logo.png')}
-              style={{ width: 80, height: 80 }}
+              style={{ width: 120, height: 120 }}
               contentFit="contain"
             />
           </View>
@@ -71,9 +73,9 @@ export default function LoginScreen() {
             autoCapitalize="none"
             keyboardType="email-address"
           />
-          <View className="relative mb-6">
+          <View className="flex-row items-center bg-card border border-border rounded-xl mb-6 pr-2">
             <TextInput
-              className="bg-card border border-border rounded-xl px-4 py-3.5 pr-12 text-base text-foreground"
+              className="flex-1 px-4 py-3.5 text-base text-foreground"
               placeholder="Password"
               placeholderTextColor={colors.mutedForeground}
               value={password}
@@ -82,17 +84,16 @@ export default function LoginScreen() {
             />
             <Pressable
               onPress={() => setShowPassword((p) => !p)}
-              className="absolute right-3 top-0 bottom-0 justify-center"
-              style={{ minWidth: 44, minHeight: 44 }}
+              style={{ width: 44, height: 44, justifyContent: 'center', alignItems: 'center' }}
               hitSlop={8}
               accessible
               accessibilityRole="button"
               accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
             >
-              <Image
-                source={`sf:${showPassword ? 'eye.slash' : 'eye'}`}
-                style={{ width: 20, height: 20 }}
-                tintColor={colors.mutedForeground}
+              <Ionicons
+                name={showPassword ? 'eye-off' : 'eye'}
+                size={22}
+                color={colors.mutedForeground}
               />
             </Pressable>
           </View>
@@ -109,20 +110,16 @@ export default function LoginScreen() {
           </Pressable>
 
           <Pressable
-            className="bg-card border border-border rounded-xl py-4 flex-row items-center justify-center gap-3 mb-8"
+            className="bg-card border border-border rounded-xl py-4 flex-row items-center justify-center gap-3 mb-3"
             onPress={handleGoogleLogin}
             style={{ minHeight: 44 }}
           >
-            <Image
-              source={{ uri: 'https://www.google.com/favicon.ico' }}
-              style={{ width: 20, height: 20 }}
-              contentFit="contain"
-            />
+            <FontAwesome5 name="google" size={20} color={colors.foreground} />
             <Text className="text-foreground font-semibold text-base">Continue with Google</Text>
           </Pressable>
 
           <Link href="/(auth)/register" asChild>
-            <Pressable className="items-center" style={{ minHeight: 44, justifyContent: 'center' }}>
+            <Pressable className="items-center pt-2" style={{ minHeight: 44, justifyContent: 'center' }}>
               <Text className="text-muted-foreground text-sm">
                 Don't have an account?{' '}
                 <Text className="text-primary font-semibold">Sign Up</Text>
