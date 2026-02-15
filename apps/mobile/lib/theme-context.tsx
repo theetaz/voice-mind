@@ -26,7 +26,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     AsyncStorage.getItem(THEME_KEY).then((saved) => {
       if (saved === 'light' || saved === 'dark' || saved === 'system') {
         setMode(saved);
-        setColorScheme(saved);
+        try { setColorScheme(saved); } catch {}
       }
     });
   }, [setColorScheme]);
@@ -34,7 +34,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const setTheme = useCallback(
     (next: ThemeMode) => {
       setMode(next);
-      setColorScheme(next);
+      try { setColorScheme(next); } catch {}
       AsyncStorage.setItem(THEME_KEY, next);
     },
     [setColorScheme],
