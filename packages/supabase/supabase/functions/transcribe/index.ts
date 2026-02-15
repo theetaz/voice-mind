@@ -1,10 +1,28 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { sendExpoPush } from '../_shared/push.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
+
+async function getEmbedding(text: string): Promise<number[]> {
+  const res = await fetch('https://api.openai.com/v1/embeddings', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${Deno.env.get('OPENAI_API_KEY')}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'text-embedding-3-small',
+      input: text.slice(0, 16000),
+    }),
+  });
+  if (!res.ok) throw new Error(`OpenAI embeddings error: ${await res.text()}`);
+  const data = await res.json();
+  return data.data[0].embedding;
+}
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -23,7 +41,6 @@ serve(async (req) => {
       });
     }
 
-    // Fetch recording
     const { data: recording, error: recError } = await supabaseAdmin
       .from('recordings')
       .select('*')
@@ -36,7 +53,16 @@ serve(async (req) => {
       });
     }
 
-    // Download audio from storage
+    const { data: profile } = await supabaseAdmin
+      .from('profiles')
+      .select('expo_push_token, summarization_enabled')
+      .eq('id', recording.user_id)
+      .single();
+    const pushToken = profile?.expo_push_token ?? null;
+    const summarizationEnabled = profile?.summarization_enabled !== false;
+
+    await sendExpoPush(pushToken, 'VoiceMind', "Transcription in progress. We'll notify you when it's ready.");
+
     const { data: audioData, error: dlError } = await supabaseAdmin.storage
       .from('recordings')
       .download(recording.audio_path);
@@ -47,7 +73,6 @@ serve(async (req) => {
       });
     }
 
-    // Send to OpenAI Whisper API with word timestamps
     const formData = new FormData();
     formData.append('file', audioData, 'audio.m4a');
     formData.append('model', 'whisper-1');
@@ -66,6 +91,7 @@ serve(async (req) => {
     }
 
     const whisperData = await whisperRes.json();
+    const text = whisperData.text || '';
 
     const words = (whisperData.words ?? []).map((w: any) => ({
       word: w.word,
@@ -74,26 +100,38 @@ serve(async (req) => {
       confidence: 1.0,
     }));
 
-    // Upsert transcript
+    let embedding: number[] | null = null;
+    if (text.length > 0) {
+      try {
+        embedding = await getEmbedding(text);
+      } catch {
+        // Continue without embedding
+      }
+    }
+
     await supabaseAdmin.from('transcripts').upsert(
       {
         recording_id: recordingId,
-        full_text: whisperData.text,
+        full_text: text,
         words,
         language: whisperData.language ?? 'en',
         provider: 'whisper',
         is_final: true,
+        ...(embedding && { embedding }),
       },
       { onConflict: 'recording_id' },
     );
 
-    // Update recording status
     await supabaseAdmin
       .from('recordings')
       .update({ status: 'ready', updated_at: new Date().toISOString() })
       .eq('id', recordingId);
 
-    return new Response(JSON.stringify({ success: true, text: whisperData.text }), {
+    if (!summarizationEnabled) {
+      await sendExpoPush(pushToken, 'VoiceMind', 'Your recording is ready.');
+    }
+
+    return new Response(JSON.stringify({ success: true, text }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   } catch (e) {
