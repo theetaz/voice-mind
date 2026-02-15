@@ -92,12 +92,13 @@ export default function SettingsScreen() {
   }, [displayName, user?.id]);
 
   return (
-    <ScrollView
-      className="flex-1 bg-background"
-      contentContainerStyle={{ padding: 16, gap: 16, paddingTop: insets.top + 16 }}
-      contentInsetAdjustmentBehavior="automatic"
-    >
-      <Text className="text-foreground font-bold mb-2" style={{ fontSize: 28 }}>Settings</Text>
+    <View className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
+      <Text className="text-foreground font-bold text-center py-4" style={{ fontSize: 20 }}>Settings</Text>
+      <ScrollView
+        className="flex-1"
+        contentContainerStyle={{ padding: 16, gap: 16 }}
+        contentInsetAdjustmentBehavior="automatic"
+      >
       {/* Profile Card */}
       <View
         className="bg-card rounded-2xl p-4 border border-border"
@@ -219,9 +220,10 @@ export default function SettingsScreen() {
         <Text className="text-destructive font-semibold" style={{ fontSize: 17 }}>Sign Out</Text>
       </Pressable>
 
-      <Text className="text-muted-foreground text-center mt-4" style={{ fontSize: 13 }}>
+      <Text className="text-muted-foreground text-center mt-4 mb-8" style={{ fontSize: 13 }}>
         {APP_NAME} v1.0.0
       </Text>
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 }
